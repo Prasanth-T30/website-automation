@@ -12,7 +12,7 @@ const Input = ({ label, error, className = "", required, as = "input", children,
           {children}
         </select>
       ) : as === "textarea" ? (
-        <textarea className="input-base" {...rest} />
+        <textarea className="input-base min-h-[220px] resize-y py-3" {...rest} />
       ) : (
         <Component className="input-base" {...rest} />
       )}

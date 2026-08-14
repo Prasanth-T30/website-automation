@@ -32,8 +32,10 @@ Usage (called from registration_service.py / routes/registration.py on Approve):
 
 from __future__ import annotations
 
+import html
 import io
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -272,6 +274,26 @@ def _draw_justified_paragraph(c: canvas.Canvas, text: str, x: float, y: float, m
     return y - h
 
 
+def _clean_custom_message(raw_message: str) -> str:
+    """Convert HTML/email text into plain text for the PDF body while preserving paragraphs."""
+    if not raw_message:
+        return ""
+
+    text = str(raw_message)
+    text = text.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+    text = re.sub(r"</(p|div|li|tr|h[1-6]|ul|ol)>", "\n\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"(?im)^\s*dear\s+.*?,?\s*$\n*", "", text)
+    text = re.sub(r"(?is)\n\s*warm regards.*$", "", text)
+    text = re.sub(r"(?is)\n\s*thank you.*$", "", text)
+    text = re.sub(r"(?is)\n\s*training team.*$", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = "\n\n".join(part.strip() for part in text.split("\n\n") if part.strip())
+    return text
+
+
 # --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
@@ -281,12 +303,14 @@ def generate_offer_letter(
     data: dict | OfferLetterData,
     logo_path: str = LOGO_PATH,
     signature_path: str = SIGNATURE_PATH,
+    custom_message: Optional[str] = None,
 ) -> bytes:
     """
     Build the internship offer / confirmation letter PDF and return it as raw bytes,
     ready to be attached to the approval email or streamed back from a FastAPI route.
     """
     if isinstance(data, dict):
+        custom_message = custom_message or data.get("approval_email_body") or data.get("custom_message")
         letter = OfferLetterData.from_registration(data) if "registration_id" not in data or "student_name" not in data \
             else OfferLetterData(**{k: v for k, v in data.items() if k in OfferLetterData.__dataclass_fields__})
     else:

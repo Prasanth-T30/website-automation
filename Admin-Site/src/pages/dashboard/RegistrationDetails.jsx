@@ -11,7 +11,7 @@ import Modal from "../../components/common/Modal";
 import DashboardLayout from "../../components/layout/DashboardLayout";
 import { UPLOADS_BASE_URL } from "../../config/config";
 import { CATEGORY_COLORS, EMAIL_ENABLED_CATEGORIES, STATUS_COLORS } from "../../utils/constants";
-import { approveRegistration, getRegistration, offerLetterUrl, rejectRegistration } from "../../services/registrationService";
+import { approveRegistration, getRegistration, offerLetterUrl, rejectRegistration, saveApprovalEmail } from "../../services/registrationService";
 
 const Row = ({ label, value }) => (
   <div className="flex items-center justify-between gap-4 border-b border-[#EEF2F7] py-2.5 text-sm">
@@ -58,9 +58,12 @@ const RegistrationDetails = () => {
   const [lightboxSrc, setLightboxSrc] = useState(null);
 
   const [approveOpen, setApproveOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [editSubject, setEditSubject] = useState("");
+  const [editBody, setEditBody] = useState("");
   const [reason, setReason] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -88,13 +91,22 @@ const RegistrationDetails = () => {
     if (EMAIL_ENABLED_CATEGORIES.includes(category)) {
       setSubject(`${category} Registration Approved`);
       setBody(
-        `Dear ${reg.name},\n\nCongratulations! Your ${category.toLowerCase()} registration has been approved.\n\nRegistration ID: ${reg.registration_id}\nCategory: ${category}\nDomain: ${reg.domain}\nDuration: ${reg.duration}\nStart Date: ${reg.start_date}\nEnd Date: ${reg.end_date}\n\nPlease find the attached ${category} confirmation letter.\n\nThank you.\nTraining Team`
+        `Congratulations! Your ${category.toLowerCase()} registration has been approved.\n\nRegistration ID: ${reg.registration_id}\nCategory: ${category}\nDomain: ${reg.domain}\nDuration: ${reg.duration}\nStart Date: ${reg.start_date}\nEnd Date: ${reg.end_date}\n\nPlease find the attached ${category} confirmation letter.`
       );
     } else {
       setSubject("");
       setBody("");
     }
     setApproveOpen(true);
+  };
+
+  const openEditApproval = () => {
+    const category = reg.category || "Internship";
+    const defaultSubject = reg.approval_email_subject || `${category} Registration Approved`;
+    const defaultBody = reg.approval_email_body || `Congratulations! Your ${category.toLowerCase()} registration has been approved.\n\nRegistration ID: ${reg.registration_id}\nCategory: ${category}\nDomain: ${reg.domain}\nDuration: ${reg.duration}\nStart Date: ${reg.start_date}\nEnd Date: ${reg.end_date}\n\nPlease find the attached ${category} confirmation letter.`;
+    setEditSubject(defaultSubject);
+    setEditBody(defaultBody);
+    setEditOpen(true);
   };
 
   const confirmApprove = async () => {
@@ -106,6 +118,20 @@ const RegistrationDetails = () => {
       fetchData();
     } catch {
       toast.error("Failed to approve registration");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const confirmSaveApprovalEmail = async () => {
+    setActionLoading(true);
+    try {
+      await saveApprovalEmail(reg.id, editSubject, editBody);
+      toast.success("Approval email and offer letter updated");
+      setEditOpen(false);
+      fetchData();
+    } catch {
+      toast.error("Failed to update approval email");
     } finally {
       setActionLoading(false);
     }
@@ -176,9 +202,14 @@ const RegistrationDetails = () => {
             </div>
 
             {reg.status === "Approved" && (
-              <a href={offerLetterUrl(reg.id)} target="_blank" rel="noreferrer" className="btn-primary mt-5 inline-flex">
-                <FiDownload /> Download Offer Letter
-              </a>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <a href={offerLetterUrl(reg.id)} target="_blank" rel="noreferrer" className="btn-primary inline-flex">
+                  <FiDownload /> Download Offer Letter
+                </a>
+                <button type="button" onClick={openEditApproval} className="btn-secondary inline-flex">
+                  Edit
+                </button>
+              </div>
             )}
 
             <div className="mt-6 flex flex-wrap justify-center gap-3 border-t border-[#EEF2F7] pt-5">
@@ -241,7 +272,7 @@ const RegistrationDetails = () => {
         {approveWillEmail ? (
           <div className="space-y-4">
             <Input label="Email Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
-            <Input as="textarea" rows={8} label="Email Content" value={body} onChange={(e) => setBody(e.target.value)} />
+            <Input as="textarea" rows={12} label="Email Content" value={body} onChange={(e) => setBody(e.target.value)} />
             <p className="text-xs font-medium text-[#8494A9]">The {reg?.category || "Internship"} confirmation letter (PDF) will be generated and attached automatically.</p>
           </div>
         ) : (
@@ -250,6 +281,26 @@ const RegistrationDetails = () => {
             mark <strong>{reg?.registration_id}</strong> as Approved.
           </p>
         )}
+      </Modal>
+
+      {/* Edit Approval Message Modal */}
+      <Modal
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title={`Edit approval message for ${reg?.registration_id || ""}`}
+        maxWidth="max-w-xl"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button variant="success" loading={actionLoading} onClick={confirmSaveApprovalEmail}>Save</Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Input label="Email Subject" value={editSubject} onChange={(e) => setEditSubject(e.target.value)} />
+          <Input as="textarea" rows={12} label="Email Content" value={editBody} onChange={(e) => setEditBody(e.target.value)} />
+          <p className="text-xs font-medium text-[#8494A9]">This update changes both the stored approval email text and the generated offer-letter PDF.</p>
+        </div>
       </Modal>
 
       {/* Reject Modal */}

@@ -1,4 +1,5 @@
 """SMTP email delivery (Brevo) with optional PDF attachment support."""
+import html
 import logging
 import smtplib
 from email.mime.application import MIMEApplication
@@ -10,12 +11,29 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+def normalize_email_body(body: str) -> str:
+    """Convert plain-text approval drafts into HTML while preserving line breaks."""
+    if not body:
+        return ""
+
+    text = str(body).strip()
+    if "<" in text and ">" in text:
+        return text
+
+    safe = html.escape(text)
+    paragraphs = [part.strip() for part in safe.split("\n\n") if part.strip()]
+    if not paragraphs:
+        return ""
+
+    return "<p>" + "</p><p>".join(paragraph.replace("\n", "<br>") for paragraph in paragraphs) + "</p>"
+
+
 def _build_message(to_email: str, subject: str, body_html: str) -> MIMEMultipart:
     msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_FROM_EMAIL}>"
     msg["To"] = to_email
-    msg.attach(MIMEText(body_html, "html"))
+    msg.attach(MIMEText(normalize_email_body(body_html), "html"))
     return msg
 
 
@@ -108,29 +126,24 @@ def _display_name(reg: dict) -> str:
     return name
 
 
-def render_approval_body(reg: dict) -> str:
+def render_approval_body(reg: dict, custom_body: str | None = None) -> str:
     category = reg.get("category") or "Internship"
+    body_text = (custom_body or f"""
+        Congratulations! Your {category.lower()} registration has been approved.
+
+        Registration ID: {reg.get('registration_id', '-')}
+        Category: {category}
+        Domain: {reg.get('domain', '-')}
+        Duration: {reg.get('duration', '-')}
+        Start Date: {_fmt_date(reg.get('start_date'))}
+        End Date: {_fmt_date(reg.get('end_date'))}
+
+        Please find the attached {category} confirmation letter.
+    """).strip()
+
     content = f"""
         <p style="margin: 0 0 14px 0;">Dear {_display_name(reg)},</p>
-        <p style="margin: 0 0 14px 0; color: #1F8A43; font-weight: bold; font-size: 15px;">
-            &#127881; Congratulations! Your {category.lower()} registration has been approved.
-        </p>
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
-               style="background-color: #F7F9FC; border: 1px solid #E3E7EF; border-radius: 6px; margin: 0 0 16px 0;">
-          <tr>
-            <td style="padding: 14px 18px;">
-              <table role="presentation" width="100%" cellpadding="4" cellspacing="0" style="font-size: 13.5px;">
-                <tr><td style="color: #7A7A7A; width: 40%;">Registration ID</td><td style="font-weight: bold;">{reg.get('registration_id', '-')}</td></tr>
-                <tr><td style="color: #7A7A7A;">Category</td><td style="font-weight: bold;">{category}</td></tr>
-                <tr><td style="color: #7A7A7A;">Domain</td><td style="font-weight: bold;">{reg.get('domain', '-')}</td></tr>
-                <tr><td style="color: #7A7A7A;">Duration</td><td style="font-weight: bold;">{reg.get('duration', '-')}</td></tr>
-                <tr><td style="color: #7A7A7A;">Start Date</td><td style="font-weight: bold;">{_fmt_date(reg.get('start_date'))}</td></tr>
-                <tr><td style="color: #7A7A7A;">End Date</td><td style="font-weight: bold;">{_fmt_date(reg.get('end_date'))}</td></tr>
-              </table>
-            </td>
-          </tr>
-        </table>
-        <p style="margin: 0 0 14px 0;">Please find your official {category} confirmation letter attached to this email.</p>
+        <p style="margin: 0 0 14px 0; white-space: pre-line;">{body_text.replace(chr(10), '<br/>')}</p>
         <p style="margin: 0;">Thank you,<br/><strong>Training Team</strong></p>
     """
     return _EMAIL_WRAPPER.replace("__CONTENT__", content)

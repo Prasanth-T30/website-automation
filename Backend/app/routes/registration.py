@@ -106,6 +106,12 @@ async def approve(registration_id: str, payload: ApproveRequest, admin: dict = D
     return ResponseModel(message=message, data=updated)
 
 
+@router.put("/registrations/{registration_id}/approval-email", response_model=ResponseModel)
+async def update_approval_message(registration_id: str, payload: ApproveRequest, admin: dict = Depends(get_current_admin)):
+    updated = await update_approval_email(registration_id, payload.subject, payload.body)
+    return ResponseModel(message="Approval email and offer letter updated", data=updated)
+
+
 @router.put("/registrations/{registration_id}/reject", response_model=ResponseModel)
 async def reject(registration_id: str, payload: RejectRequest, admin: dict = Depends(get_current_admin)):
     updated = await reject_registration(registration_id, payload.reason)

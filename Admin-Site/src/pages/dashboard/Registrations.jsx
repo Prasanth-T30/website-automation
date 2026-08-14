@@ -82,7 +82,7 @@ const Registrations = () => {
     if (EMAIL_ENABLED_CATEGORIES.includes(category)) {
       setSubject(`${category} Registration Approved`);
       setBody(
-        `Dear ${reg.name},\n\nCongratulations! Your ${category.toLowerCase()} registration has been approved.\n\nRegistration ID: ${reg.registration_id}\nCategory: ${category}\nDomain: ${reg.domain}\nDuration: ${reg.duration}\nStart Date: ${reg.start_date}\nEnd Date: ${reg.end_date}\n\nPlease find the attached ${category} confirmation letter.\n\nThank you.\nTraining Team`
+        `Congratulations! Your ${category.toLowerCase()} registration has been approved.\n\nRegistration ID: ${reg.registration_id}\nCategory: ${category}\nDomain: ${reg.domain}\nDuration: ${reg.duration}\nStart Date: ${reg.start_date}\nEnd Date: ${reg.end_date}\n\nPlease find the attached ${category} confirmation letter.`
       );
     } else {
       setSubject("");
@@ -243,7 +243,7 @@ const Registrations = () => {
         {approveWillEmail ? (
           <div className="space-y-4">
             <Input label="Email Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
-            <Input as="textarea" rows={8} label="Email Content" value={body} onChange={(e) => setBody(e.target.value)} />
+            <Input as="textarea" rows={12} label="Email Content" value={body} onChange={(e) => setBody(e.target.value)} />
             <p className="text-xs font-medium text-[#8494A9]">The {approveTarget?.category || "Internship"} confirmation letter (PDF) will be generated and attached automatically.</p>
           </div>
         ) : (

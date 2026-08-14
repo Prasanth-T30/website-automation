@@ -22,6 +22,11 @@ export const approveRegistration = async (id, subject, body) => {
   return data.data;
 };
 
+export const saveApprovalEmail = async (id, subject, body) => {
+  const { data } = await api.put(`/registrations/${id}/approval-email`, { subject, body });
+  return data.data;
+};
+
 export const rejectRegistration = async (id, reason) => {
   const { data } = await api.put(`/registrations/${id}/reject`, { reason });
   return data.data;

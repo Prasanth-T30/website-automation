@@ -101,22 +101,37 @@ async def approve_registration(registration_id: str, subject: str, body: str) ->
     if doc["status"] == STATUS_APPROVED:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Registration is already approved")
 
-    col = registrations_collection()
-    updated_at = datetime.utcnow()
-    await col.update_one({"_id": doc["_id"]}, {"$set": {"status": STATUS_APPROVED, "updated_at": updated_at, "approved_at": updated_at}})
-    doc["status"] = STATUS_APPROVED
-    doc["approved_at"] = updated_at
-
     # Older records may not have a "category" — treat them as Internship for backward compatibility.
     category = doc.get("category") or "Internship"
+    email_subject = subject or f"{category} Registration Approved"
+    email_body = body or render_approval_body(doc)
+
+    col = registrations_collection()
+    updated_at = datetime.utcnow()
+    await col.update_one(
+        {"_id": doc["_id"]},
+        {
+            "$set": {
+                "status": STATUS_APPROVED,
+                "updated_at": updated_at,
+                "approved_at": updated_at,
+                "approval_email_subject": email_subject,
+                "approval_email_body": email_body,
+            }
+        }
+    )
+    doc["status"] = STATUS_APPROVED
+    doc["approved_at"] = updated_at
+    doc["approval_email_subject"] = email_subject
+    doc["approval_email_body"] = email_body
+
     email_sent = False
     if category in EMAIL_ENABLED_CATEGORIES:
         pdf_bytes = generate_offer_letter(doc)
-        email_body = body or render_approval_body(doc)
         send_email(
             to_email=doc["email"],
-            subject=subject or f"{category} Registration Approved",
-            body_html=email_body,
+            subject=email_subject,
+            body_html=render_approval_body(doc, body or "Congratulations! Your registration has been approved."),
             pdf_bytes=pdf_bytes,
             pdf_filename=f"{category}_Letter_{doc['registration_id']}.pdf",
         )
@@ -125,6 +140,24 @@ async def approve_registration(registration_id: str, subject: str, body: str) ->
     fresh = await get_registration_or_404(registration_id)
     result = serialize_document(fresh)
     result["email_sent"] = email_sent
+    return result
+
+
+async def update_approval_email(registration_id: str, subject: str, body: str) -> dict:
+    doc = await get_registration_or_404(registration_id)
+    category = doc.get("category") or "Internship"
+    email_subject = subject or f"{category} Registration Approved"
+    email_body = body or render_approval_body(doc)
+
+    await registrations_collection().update_one(
+        {"_id": doc["_id"]},
+        {"$set": {"approval_email_subject": email_subject, "approval_email_body": email_body, "updated_at": datetime.utcnow()}},
+    )
+
+    fresh = await get_registration_or_404(registration_id)
+    result = serialize_document(fresh)
+    result["approval_email_subject"] = email_subject
+    result["approval_email_body"] = email_body
     return result
 
 
