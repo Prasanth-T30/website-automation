@@ -1,0 +1,5 @@
+packages:
+  - "frontend"
+allowBuilds:
+  # esbuild ships prebuilt binaries and needs its install script to run.
+  esbuild: true

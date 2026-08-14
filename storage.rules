@@ -1,0 +1,12 @@
+rules_version = '2';
+
+// Uploads and downloads go through the FastAPI backend (Admin SDK), which
+// enforces auth, file-type and size checks itself. No client-side Firebase
+// Storage access is used, so direct client access is denied outright.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

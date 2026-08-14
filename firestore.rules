@@ -1,0 +1,12 @@
+rules_version = '2';
+
+// No client ever talks to Firestore directly — the React app only calls the
+// FastAPI backend, which reads/writes via the Admin SDK and bypasses these
+// rules entirely. Client access is therefore denied outright.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,248 @@
+/* ============================================================================
+   Dvein Console — design tokens
+   ----------------------------------------------------------------------------
+   Palette matches Dvein Innovations' actual brand (pulled from the company's
+   live registration site and letterhead), not an invented interpretation:
+
+     brand   (#3569AC)  primary actions, active navigation, links
+     accent  (#15B5B8)  secondary emphasis, focus rings, chart accents
+     signal  (#7DC244)  success and conversion moments — the gradient's
+                        third stop, matching the brand mark's green accent
+     neutral (slate-blue) surfaces, borders, text
+     warn / danger      status only, never decoration
+   ========================================================================== */
+
+@import "tailwindcss";
+
+/* Theme is driven by an explicit attribute so the in-app toggle wins over the
+   OS setting; index.html stamps it before first paint to avoid a flash. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* ── brand · blue (#3569AC) ───────────────────────────────────────────── */
+  --color-brand-50:  #eef4fc;
+  --color-brand-100: #d7e6f7;
+  --color-brand-200: #b4d0ef;
+  --color-brand-300: #8fb7e3;
+  --color-brand-400: #5c8fce;
+  --color-brand-500: #3569ac;
+  --color-brand-600: #2a5488;
+  --color-brand-700: #1f3f66;
+  --color-brand-800: #172f4d;
+  --color-brand-900: #101f33;
+  --color-brand-950: #0b141f;
+
+  /* ── accent · teal (#15B5B8) ──────────────────────────────────────────── */
+  --color-accent-50:  #eafbfb;
+  --color-accent-100: #cff5f5;
+  --color-accent-200: #9fe8e9;
+  --color-accent-300: #6bdadc;
+  --color-accent-400: #3fd0d3;
+  --color-accent-500: #15b5b8;
+  --color-accent-600: #0f8f92;
+  --color-accent-700: #0c7375;
+  --color-accent-800: #095a5c;
+  --color-accent-900: #073f40;
+
+  /* ── signal · green (#7DC244) ─────────────────────────────────────────── */
+  --color-signal-50:  #f3faec;
+  --color-signal-100: #e1f3d0;
+  --color-signal-200: #c3e7a3;
+  --color-signal-300: #a4db76;
+  --color-signal-400: #8fd05b;
+  --color-signal-500: #7dc244;
+  --color-signal-600: #649e32;
+  --color-signal-700: #4d7a27;
+  --color-signal-800: #38571c;
+  --color-signal-900: #253a12;
+
+  /* ── warn · amber ─────────────────────────────────────────────────────── */
+  --color-warn-50:  #fffbeb;
+  --color-warn-100: #fef3c7;
+  --color-warn-300: #fcd34d;
+  --color-warn-500: #f59e0b;
+  --color-warn-600: #d97706;
+  --color-warn-700: #b45309;
+
+  /* ── danger · red ─────────────────────────────────────────────────────── */
+  --color-danger-50:  #fef2f2;
+  --color-danger-100: #fee2e2;
+  --color-danger-300: #fca5a5;
+  --color-danger-500: #ef4444;
+  --color-danger-600: #dc2626;
+  --color-danger-700: #b91c1c;
+
+  /* ── category tags (registration form: Internship/Course/Project) ──────── */
+  --color-category-internship-bg:   #d7e6f7;
+  --color-category-internship-text: #1f3f66;
+  --color-category-course-bg:       #ede9fe;
+  --color-category-course-text:     #5b21b6;
+  --color-category-project-bg:      #fed7aa;
+  --color-category-project-text:    #9a3412;
+
+  /* ── radii — matches the reference's input/button (11px) and card (20px) ── */
+  --radius-sm: 8px;
+  --radius-md: 11px;
+  --radius-lg: 20px;
+
+  /* ── elevation ─────────────────────────────────────────────────────────── */
+  --shadow-card: 0 18px 46px -30px rgb(15 27 45 / 0.42);
+  --shadow-overlay: 0 24px 60px -24px rgb(15 27 45 / 0.5);
+
+  /* The logo gradient, for the mark and conversion moments. */
+  --gradient-brand: linear-gradient(135deg, #3569ac 0%, #15b5b8 55%, #7dc244 100%);
+}
+
+/* ============================================================================
+   Semantic layer
+   Components reference these, never the raw ramps above. Swapping a theme means
+   redefining this block — component code never changes.
+   ========================================================================== */
+
+:root {
+  --bg-canvas:      #eef2f8;
+  --bg-surface:     #ffffff;
+  --bg-subtle:      #f7fafd;
+  --bg-inset:       #eef2f7;
+
+  --border-subtle:  #e7edf5;
+  --border-default: #dee7f1;
+  --border-strong:  #b7c6d9;
+
+  --text-primary:   #0f1b2d;
+  --text-secondary: #41536b;
+  --text-muted:     #5a6b82;
+  --text-inverted:  #f8fafc;
+
+  --brand:          var(--color-brand-500);
+  --brand-hover:    var(--color-brand-600);
+  --brand-subtle:   var(--color-brand-50);
+  --brand-text:     var(--color-brand-700);
+  --on-brand:       #ffffff;
+
+  --accent:         var(--color-accent-600);
+  --accent-subtle:  var(--color-accent-50);
+
+  --success:        var(--color-signal-600);
+  --success-subtle: var(--color-signal-50);
+  --success-text:   var(--color-signal-800);
+
+  --warn:           var(--color-warn-600);
+  --warn-subtle:    var(--color-warn-50);
+  --warn-text:      var(--color-warn-700);
+
+  --danger:         var(--color-danger-600);
+  --danger-subtle:  var(--color-danger-50);
+  --danger-text:    var(--color-danger-700);
+
+  --focus-ring:     var(--color-brand-500);
+
+  --elevation-1: var(--shadow-card);
+  --elevation-2: var(--shadow-overlay);
+
+  /* The soft top-of-viewport glow used behind the public form and app shell. */
+  --shell-wash: radial-gradient(900px 420px at 50% -180px, #dce9f7 0%, #eef2f8 62%);
+}
+
+/* Dark is a genuine re-grade, not an inversion: surfaces lift as they come
+   forward, and the brand steps lighter so it keeps AA contrast on dark ground. */
+:root[data-theme="dark"] {
+  --bg-canvas:      #0b1220;
+  --bg-surface:     #111a2b;
+  --bg-subtle:      #172234;
+  --bg-inset:       #1e2b3f;
+
+  --border-subtle:  #1e2b3f;
+  --border-default: #2b3a52;
+  --border-strong:  #475569;
+
+  --text-primary:   #e8eef7;
+  --text-secondary: #a9b8cc;
+  --text-muted:     #7d8da3;
+  --text-inverted:  #0f172a;
+
+  --brand:          var(--color-brand-400);
+  --brand-hover:    var(--color-brand-300);
+  --brand-subtle:   #16264a;
+  --brand-text:     var(--color-brand-300);
+  --on-brand:       #ffffff;
+
+  --accent:         var(--color-accent-400);
+  --accent-subtle:  #0c2f3a;
+
+  --success:        var(--color-signal-400);
+  --success-subtle: #1a2c10;
+  --success-text:   var(--color-signal-300);
+
+  --warn:           var(--color-warn-500);
+  --warn-subtle:    #3a2a0a;
+  --warn-text:      var(--color-warn-300);
+
+  --danger:         var(--color-danger-500);
+  --danger-subtle:  #3a1414;
+  --danger-text:    var(--color-danger-300);
+
+  --focus-ring:     var(--color-brand-400);
+
+  --elevation-1: 0 1px 2px rgb(0 0 0 / 0.4), 0 1px 3px rgb(0 0 0 / 0.3);
+  --elevation-2: 0 10px 15px -3px rgb(0 0 0 / 0.5), 0 4px 6px -4px rgb(0 0 0 / 0.4);
+
+  --shell-wash: radial-gradient(900px 420px at 50% -180px, #16264a 0%, #0b1220 62%);
+}
+
+/* Dvein's admin chrome (sidebar, login header) is fixed dark-navy on purpose —
+   it's the company's real product identity, independent of the content-area
+   light/dark toggle. Defined here, once, so it never drifts from the palette. */
+:root {
+  --chrome-bg:      #0e1a2b;
+  --chrome-border:  #1c2a3e;
+  --chrome-text:    #94a3b8;
+  --chrome-text-hover: #e2e8f0;
+}
+
+/* Expose the semantic layer to Tailwind so `bg-surface`, `text-fg-muted`,
+   `border-line`, `shadow-e1` etc. resolve as ordinary utilities that follow the
+   active theme automatically. */
+@theme inline {
+  --color-canvas:  var(--bg-canvas);
+  --color-surface: var(--bg-surface);
+  --color-subtle:  var(--bg-subtle);
+  --color-inset:   var(--bg-inset);
+
+  --color-line:        var(--border-default);
+  --color-line-subtle: var(--border-subtle);
+  --color-line-strong: var(--border-strong);
+
+  --color-fg:           var(--text-primary);
+  --color-fg-secondary: var(--text-secondary);
+  --color-fg-muted:     var(--text-muted);
+
+  --color-brand:        var(--brand);
+  --color-brand-hover:  var(--brand-hover);
+  --color-brand-subtle: var(--brand-subtle);
+  --color-on-brand:     var(--on-brand);
+
+  --color-accent:        var(--accent);
+  --color-accent-subtle: var(--accent-subtle);
+
+  --color-success:        var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-success-text:   var(--success-text);
+  --color-warn:           var(--warn);
+  --color-warn-subtle:    var(--warn-subtle);
+  --color-warn-text:      var(--warn-text);
+  --color-danger:         var(--danger);
+  --color-danger-subtle:  var(--danger-subtle);
+  --color-danger-text:    var(--danger-text);
+
+  --color-chrome:            var(--chrome-bg);
+  --color-chrome-border:     var(--chrome-border);
+  --color-chrome-text:       var(--chrome-text);
+  --color-chrome-text-hover: var(--chrome-text-hover);
+
+  --shadow-e1: var(--elevation-1);
+  --shadow-e2: var(--elevation-2);
+}

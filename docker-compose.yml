@@ -1,0 +1,38 @@
+name: dvein-hrm
+
+# There is no local database service here: Firestore/Storage are either the
+# Firebase emulator (run natively via `firebase emulators:start` — see
+# README.md, since containerizing it adds a JDK + npm layer for no benefit)
+# or the real Firebase project in staging/production.
+services:
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in .env}
+      APP_ENV: ${APP_ENV:-development}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-demo-dvein-hrm}
+      FIREBASE_SERVICE_ACCOUNT_PATH: ${FIREBASE_SERVICE_ACCOUNT_PATH:-}
+      FIREBASE_STORAGE_BUCKET: ${FIREBASE_STORAGE_BUCKET:-demo-dvein-hrm.appspot.com}
+      # host.docker.internal reaches a `firebase emulators:start` running on
+      # the host machine, outside this compose network.
+      FIRESTORE_EMULATOR_HOST: ${FIRESTORE_EMULATOR_HOST:-host.docker.internal:8080}
+      FIREBASE_STORAGE_EMULATOR_HOST: ${FIREBASE_STORAGE_EMULATOR_HOST:-host.docker.internal:9199}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "5173:80"
