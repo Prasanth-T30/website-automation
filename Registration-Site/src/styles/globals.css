@@ -66,3 +66,33 @@ body {
 ::-webkit-scrollbar { width: 9px; height: 9px; }
 ::-webkit-scrollbar-thumb { @apply rounded-full bg-[#C9D4E3]; }
 ::-webkit-scrollbar-track { @apply bg-transparent; }
+
+/* react-datepicker theming to match the app's card/input styling */
+.react-datepicker-popper {
+  z-index: 50;
+}
+
+.react-datepicker {
+  @apply rounded-[14px] border border-[#DEE7F1] font-sans shadow-[0_18px_46px_-30px_rgba(15,27,45,.42)];
+}
+
+.react-datepicker__header {
+  @apply rounded-t-[14px] border-b border-[#E7EDF5] bg-[#F7FAFD];
+}
+
+.react-datepicker__day--selected,
+.react-datepicker__day--keyboard-selected {
+  @apply rounded-full bg-primary-500 text-white hover:bg-primary-600;
+}
+
+.react-datepicker__day:hover {
+  @apply rounded-full;
+}
+
+.react-datepicker__day--today {
+  @apply font-extrabold text-primary-600;
+}
+
+.react-datepicker__triangle {
+  display: none;
+}

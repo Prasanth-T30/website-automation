@@ -24,6 +24,8 @@ export const DOMAIN_CHOICES = [
 
 export const DURATION_CHOICES = ["15 Days", "30 Days", "45 Days", "60 Days", "90 Days"];
 
+export const MODE_CHOICES = ["Online", "Offline"];
+
 export const STATUS_COLORS = {
   Pending: "bg-amber-100 text-amber-700 border-amber-200",
   Approved: "bg-emerald-100 text-emerald-700 border-emerald-200",

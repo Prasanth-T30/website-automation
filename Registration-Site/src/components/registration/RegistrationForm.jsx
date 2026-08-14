@@ -1,15 +1,40 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
 import { FiBookOpen, FiBriefcase, FiCheck, FiCode, FiUser } from "react-icons/fi";
 import { toast } from "react-toastify";
+import ReactDatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
+
+// Some bundlers (Vite's dev pre-bundler in particular) double-wrap this package's
+// default export, turning it into { default: DatePicker, ... } instead of the
+// component itself. Unwrap it defensively so it works in both dev and prod builds.
+const DatePicker = ReactDatePicker.default ?? ReactDatePicker;
 
 import Button from "../common/Button";
 import Input from "../common/Input";
-import { CATEGORY_LABELS, DOMAIN_CHOICES, DURATION_CHOICES, TITLE_CHOICES, YEAR_CHOICES } from "../../utils/constants";
+import { CATEGORY_LABELS, DOMAIN_CHOICES, DURATION_CHOICES, MODE_CHOICES, TITLE_CHOICES, YEAR_CHOICES } from "../../utils/constants";
 import { submitRegistration } from "../../services/registrationService";
 import { useAutofillSync } from "../../hooks/useAutofillSync";
 import PaymentUpload from "./PaymentUpload";
+
+// Converts a Date (or date-like value) to a "yyyy-MM-dd" string for form/API use.
+const toISODate = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+// Parses a "yyyy-MM-dd" string back into a Date object for the picker's `selected` prop.
+const fromISODate = (value) => {
+  if (!value) return null;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
 
 const CATEGORY_CARDS = [
   { value: "Internship", title: "Internship", note: "Hands-on placement with a mentor", icon: FiBriefcase, accent: "from-primary-500 to-accent-500" },
@@ -30,6 +55,8 @@ const RegistrationForm = () => {
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const formRef = useRef(null);
+  const startDatePickerRef = useRef(null);
+  const endDatePickerRef = useRef(null);
   const {
     register,
     handleSubmit,
@@ -51,12 +78,33 @@ const RegistrationForm = () => {
   const isProfessional = applicantType === "professional";
   const progress = `${(step / STEPS.length) * 100}%`;
 
+  const startDateValue = watch("start_date");
+  const durationValue = watch("duration");
+  const endDateValue = watch("end_date");
+
+  // Auto-calculate the end date whenever both a start date and a duration are chosen.
+  useEffect(() => {
+    if (!startDateValue || !durationValue) return;
+    const days = parseInt(durationValue, 10);
+    if (Number.isNaN(days)) return;
+    const start = fromISODate(startDateValue);
+    if (!start) return;
+    const end = new Date(start);
+    end.setDate(end.getDate() + days);
+    setValue("end_date", toISODate(end), { shouldValidate: true, shouldDirty: true });
+  }, [startDateValue, durationValue, setValue]);
+
   const stepFields = useMemo(() => ({
     1: ["title", "name", "email", "phone", "college", "place"],
     2: ["category"],
-    3: ["domain", "duration", "start_date", "end_date"],
+    3: ["domain", "duration", "start_date", "end_date", "mode"],
     4: ["amount", "transaction_id", "declaration"],
   }), []);
+
+  const phoneField = register("phone", {
+    required: "Mobile number is required",
+    pattern: { value: /^[0-9]{10}$/, message: "Enter a valid 10-digit mobile number" },
+  });
 
   const goNext = async () => {
     const ok = await trigger(stepFields[step] || []);
@@ -154,7 +202,20 @@ const RegistrationForm = () => {
             </Input>
             <Input label="Full Name" required placeholder="Enter full name" error={errors.name?.message} {...register("name", { required: "Full name is required" })} />
             <Input label="Email" type="email" required placeholder="you@example.com" error={errors.email?.message} {...register("email", { required: "Email is required" })} />
-            <Input label="Mobile Number" required placeholder="10-digit mobile number" error={errors.phone?.message} {...register("phone", { required: "Mobile number is required" })} />
+            <Input
+              label="Mobile Number"
+              required
+              type="tel"
+              inputMode="numeric"
+              maxLength={10}
+              placeholder="10-digit mobile number"
+              error={errors.phone?.message}
+              {...phoneField}
+              onChange={(e) => {
+                e.target.value = e.target.value.replace(/\D/g, "").slice(0, 10);
+                phoneField.onChange(e);
+              }}
+            />
             <Input label={isProfessional ? "Company / Organisation" : "College Name"} required placeholder={isProfessional ? "Enter company name" : "Enter college name"} error={errors.college?.message} {...register("college", { required: isProfessional ? "Company name is required" : "College name is required" })} />
             <Input label="Place" required placeholder="City / Town" error={errors.place?.message} {...register("place", { required: "Place is required" })} />
             <Input label={isProfessional ? "Designation" : "Department"} placeholder={isProfessional ? "e.g. Software Engineer" : "e.g. CSE, ECE, IT"} {...register("department")} />
@@ -225,8 +286,71 @@ const RegistrationForm = () => {
               <option value="">Select duration</option>
               {DURATION_CHOICES.map((d) => <option key={d} value={d}>{d}</option>)}
             </Input>
-            <Input label="Start Date" type="date" required error={errors.start_date?.message} {...register("start_date", { required: "Start date is required" })} />
-            <Input label="End Date" type="date" required error={errors.end_date?.message} {...register("end_date", { required: "End date is required" })} />
+
+            <div>
+              <span className="dv-label">
+                Start Date <span className="text-[#DC5B5B]">*</span>
+              </span>
+              <DatePicker
+                ref={startDatePickerRef}
+                selected={fromISODate(startDateValue)}
+                onChange={(date) => setValue("start_date", toISODate(date), { shouldValidate: true, shouldDirty: true })}
+                dateFormat="dd-MM-yyyy"
+                placeholderText="dd-mm-yyyy"
+                className="input-base w-full"
+                wrapperClassName="w-full"
+                minDate={new Date()}
+              >
+                <div className="flex justify-end border-t border-[#E7EDF5] px-1 pb-1 pt-2">
+                  <button
+                    type="button"
+                    className="rounded-md bg-primary-500 px-3 py-1 text-xs font-bold text-white"
+                    onClick={() => startDatePickerRef.current?.setOpen(false)}
+                  >
+                    OK
+                  </button>
+                </div>
+              </DatePicker>
+              <input type="hidden" {...register("start_date", { required: "Start date is required" })} />
+              {errors.start_date?.message && <p className="mt-1 text-xs font-medium text-[#C2453F]">{errors.start_date.message}</p>}
+            </div>
+
+            <div>
+              <span className="dv-label">
+                End Date <span className="text-[#DC5B5B]">*</span>
+              </span>
+              <DatePicker
+                ref={endDatePickerRef}
+                selected={fromISODate(endDateValue)}
+                onChange={(date) => setValue("end_date", toISODate(date), { shouldValidate: true, shouldDirty: true })}
+                dateFormat="dd-MM-yyyy"
+                placeholderText="dd-mm-yyyy"
+                className="input-base w-full"
+                wrapperClassName="w-full"
+                minDate={fromISODate(startDateValue) || new Date()}
+              >
+                <div className="flex justify-end border-t border-[#E7EDF5] px-1 pb-1 pt-2">
+                  <button
+                    type="button"
+                    className="rounded-md bg-primary-500 px-3 py-1 text-xs font-bold text-white"
+                    onClick={() => endDatePickerRef.current?.setOpen(false)}
+                  >
+                    OK
+                  </button>
+                </div>
+              </DatePicker>
+              <input type="hidden" {...register("end_date", { required: "End date is required" })} />
+              {errors.end_date?.message && <p className="mt-1 text-xs font-medium text-[#C2453F]">{errors.end_date.message}</p>}
+            </div>
+
+            <div className="flex justify-center sm:col-span-2">
+              <div className="w-full sm:w-1/2">
+                <Input as="select" label="Mode" required error={errors.mode?.message} {...register("mode", { required: "Please select a mode" })}>
+                  <option value="">Select mode</option>
+                  {MODE_CHOICES.map((m) => <option key={m} value={m}>{m}</option>)}
+                </Input>
+              </div>
+            </div>
           </div>
         </section>
       )}
