@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+uploads/payments/*
+!uploads/payments/.gitkeep
+uploads/templates/*
+!uploads/templates/.gitkeep
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/

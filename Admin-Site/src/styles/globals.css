@@ -1,0 +1,70 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-[#EEF2F8] text-[#0F1B2D] font-sans antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Custom component classes live in the "components" layer so Tailwind
+   applies them BEFORE the utilities layer in the generated stylesheet.
+   That lets a plain utility override (e.g. className="input-base w-auto")
+   win the cascade as expected — without @layer here, these rules were
+   emitted after @tailwind utilities in source order and silently beat
+   any utility class of equal specificity (e.g. w-full from input-base
+   always beat w-auto), which is what was forcing the filter dropdowns
+   on the Registrations page to render full-width instead of auto-width. */
+@layer components {
+  .glass-card {
+    @apply rounded-2xl border border-[#DEE7F1] bg-white shadow-[0_18px_46px_-30px_rgba(15,27,45,.42)];
+  }
+
+  .input-base {
+    @apply h-11 w-full rounded-[11px] border border-[#DCE4EE] bg-white px-3.5 text-sm text-[#0F1B2D]
+      placeholder-[#8A99AD] shadow-sm shadow-transparent transition
+      focus:border-primary-500 focus:outline-none focus:ring-4 focus:ring-primary-500/15
+      disabled:cursor-not-allowed disabled:bg-[#F2F6FB];
+  }
+
+  .btn-primary {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-[11px] bg-primary-500 px-4 py-2.5
+      text-sm font-bold text-white shadow-[0_12px_24px_-16px_rgba(53,105,172,.9)]
+      transition hover:bg-primary-600 active:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-[11px] border border-[#DCE4EE] bg-white px-4 py-2.5
+      text-sm font-bold text-[#41536B] shadow-sm transition hover:bg-[#F2F6FB]
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-danger {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-[11px] bg-[#C2453F] px-4 py-2.5
+      text-sm font-bold text-white shadow-sm transition hover:brightness-105 disabled:opacity-50;
+  }
+
+  .btn-success {
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-[11px] bg-[#2E8B57] px-4 py-2.5
+      text-sm font-bold text-white shadow-sm transition hover:brightness-105 disabled:opacity-50;
+  }
+
+  .dv-admin-shell {
+    background: radial-gradient(860px 420px at 55% -210px, #DCE9F7 0%, #EEF2F8 64%);
+  }
+}
+
+@keyframes dvRise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { @apply rounded-full bg-[#C9D4E3]; }
+::-webkit-scrollbar-track { @apply bg-transparent; }
