@@ -36,6 +36,11 @@ const fromISODate = (value) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
+const isValidEmail = (value) => {
+  if (!value) return false;
+  return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(value.trim());
+};
+
 const CATEGORY_CARDS = [
   { value: "Internship", title: "Internship", note: "Hands-on placement with a mentor", icon: FiBriefcase, accent: "from-primary-500 to-accent-500" },
   { value: "Course", title: "Course", note: "Structured training programme with placement", icon: FiBookOpen, accent: "from-[#6A5AE0] to-accent-500" },
@@ -81,6 +86,8 @@ const RegistrationForm = () => {
   const startDateValue = watch("start_date");
   const durationValue = watch("duration");
   const endDateValue = watch("end_date");
+  const emailValue = watch("email") || "";
+  const isEmailVerified = isValidEmail(emailValue);
 
   // Auto-calculate the end date whenever both a start date and a duration are chosen.
   useEffect(() => {
@@ -104,6 +111,18 @@ const RegistrationForm = () => {
   const phoneField = register("phone", {
     required: "Mobile number is required",
     pattern: { value: /^[0-9]{10}$/, message: "Enter a valid 10-digit mobile number" },
+  });
+
+  const emailField = register("email", {
+    required: "Email is required",
+    validate: (value) => {
+      const email = value?.trim();
+      if (!email) return "Email is required";
+      if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email)) {
+        return "Enter a valid email address";
+      }
+      return true;
+    },
   });
 
   const goNext = async () => {
@@ -201,7 +220,16 @@ const RegistrationForm = () => {
               {TITLE_CHOICES.map((t) => <option key={t} value={t}>{t}</option>)}
             </Input>
             <Input label="Full Name" required placeholder="Enter full name" error={errors.name?.message} {...register("name", { required: "Full name is required" })} />
-            <Input label="Email" type="email" required placeholder="you@example.com" error={errors.email?.message} {...register("email", { required: "Email is required" })} />
+            <div>
+              <Input label="Email" type="email" required placeholder="you@example.com" error={errors.email?.message} {...emailField} />
+              {emailValue !== "" && (
+                <div className="mt-2 flex items-center gap-2">
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${isEmailVerified ? "bg-[#EAF9F2] text-[#1C8C5C]" : "bg-[#FDECEC] text-[#C2453F]"}`}>
+                    {isEmailVerified ? "✓ Verified" : "✕ Invalid email"}
+                  </span>
+                </div>
+              )}
+            </div>
             <Input
               label="Mobile Number"
               required
@@ -380,7 +408,12 @@ const RegistrationForm = () => {
           Back
         </Button>
         {step < 4 ? (
-          <Button type="button" onClick={goNext}>
+          <Button
+            type="button"
+            onClick={goNext}
+            disabled={step === 1 && !isEmailVerified}
+            className={step === 1 && !isEmailVerified ? "cursor-not-allowed opacity-60" : ""}
+          >
             Continue
           </Button>
         ) : (
