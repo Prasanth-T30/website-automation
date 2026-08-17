@@ -5,6 +5,11 @@ from datetime import datetime
 import pandas as pd
 from bson import ObjectId
 from fastapi import HTTPException, status
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.core.constants import EMAIL_ENABLED_CATEGORIES, STATUS_APPROVED, STATUS_PENDING, STATUS_REJECTED
 from app.database.mongodb import registrations_collection
@@ -192,16 +197,17 @@ async def delete_registration(registration_id: str) -> None:
 async def export_dataframe() -> pd.DataFrame:
     col = registrations_collection()
     items = [serialize_document(doc) async for doc in col.find({}).sort("created_at", -1)]
-    if not items:
-        return pd.DataFrame(columns=[
-            "registration_id", "name", "email", "phone", "applicant_type", "college", "place", "category", "domain",
-            "duration", "start_date", "end_date", "amount", "transaction_id", "status", "created_at",
-        ])
-    df = pd.DataFrame(items)
+
     columns = [
-        "registration_id", "name", "email", "phone", "applicant_type", "college", "place", "category", "domain",
-        "duration", "start_date", "end_date", "amount", "transaction_id", "status", "created_at",
+        "registration_id", "title", "name", "email", "phone", "applicant_type", "college", "department",
+        "year", "place", "category", "domain", "duration", "start_date", "end_date", "amount",
+        "transaction_id", "status", "created_at",
     ]
+
+    if not items:
+        return pd.DataFrame(columns=columns)
+
+    df = pd.DataFrame(items)
     return df[[c for c in columns if c in df.columns]]
 
 
@@ -217,3 +223,57 @@ async def export_to_excel() -> bytes:
 async def export_to_csv() -> bytes:
     df = await export_dataframe()
     return df.to_csv(index=False).encode("utf-8")
+
+
+async def export_to_pdf() -> bytes:
+    df = await export_dataframe()
+    columns = [
+        "registration_id", "title", "name", "email", "phone", "applicant_type", "college", "department",
+        "year", "place", "category", "domain", "duration", "start_date", "end_date", "amount",
+        "transaction_id", "status", "created_at",
+    ]
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=12 * mm,
+        bottomMargin=12 * mm,
+    )
+    styles = getSampleStyleSheet()
+    heading = Paragraph("DVein Registration Report", styles["Title"])
+    story = [heading, Spacer(1, 6 * mm)]
+
+    rows = df.reindex(columns=columns).fillna("") if not df.empty else pd.DataFrame(columns=columns)
+    if rows.empty:
+        story.append(Paragraph("No registrations found.", styles["BodyText"]))
+    else:
+        for _, row in rows.iterrows():
+            details = [
+                Paragraph(f"<b>Registration ID:</b> {row.get('registration_id', '')}", styles["BodyText"]),
+                Paragraph(f"<b>Name:</b> {row.get('title', '')} {row.get('name', '')}".strip(), styles["BodyText"]),
+                Paragraph(f"<b>Email:</b> {row.get('email', '')}", styles["BodyText"]),
+                Paragraph(f"<b>Phone:</b> {row.get('phone', '')}", styles["BodyText"]),
+                Paragraph(f"<b>Applicant Type:</b> {row.get('applicant_type', '')}", styles["BodyText"]),
+                Paragraph(f"<b>College:</b> {row.get('college', '')}", styles["BodyText"]),
+                Paragraph(f"<b>Department:</b> {row.get('department', '')}", styles["BodyText"]),
+                Paragraph(f"<b>Year:</b> {row.get('year', '')}", styles["BodyText"]),
+                Paragraph(f"<b>Place:</b> {row.get('place', '')}", styles["BodyText"]),
+                Paragraph(f"<b>Category:</b> {row.get('category', '')}", styles["BodyText"]),
+                Paragraph(f"<b>Domain:</b> {row.get('domain', '')}", styles["BodyText"]),
+                Paragraph(f"<b>Duration:</b> {row.get('duration', '')}", styles["BodyText"]),
+                Paragraph(f"<b>Start Date:</b> {row.get('start_date', '')}", styles["BodyText"]),
+                Paragraph(f"<b>End Date:</b> {row.get('end_date', '')}", styles["BodyText"]),
+                Paragraph(f"<b>Amount:</b> {row.get('amount', '')}", styles["BodyText"]),
+                Paragraph(f"<b>Transaction ID:</b> {row.get('transaction_id', '')}", styles["BodyText"]),
+                Paragraph(f"<b>Status:</b> {row.get('status', '')}", styles["BodyText"]),
+                Paragraph(f"<b>Created At:</b> {row.get('created_at', '')}", styles["BodyText"]),
+            ]
+            story.append(Paragraph("-" * 100, styles["BodyText"]))
+            story.extend(details)
+            story.append(Spacer(1, 5 * mm))
+
+    doc.build(story)
+    return buffer.getvalue()

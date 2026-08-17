@@ -39,6 +39,7 @@ const Registrations = () => {
   const [body, setBody] = useState("");
   const [reason, setReason] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(null);
 
   const approveWillEmail = approveTarget ? EMAIL_ENABLED_CATEGORIES.includes(approveTarget.category) : true;
 
@@ -156,11 +157,47 @@ const Registrations = () => {
           </select>
         </div>
         <div className="flex shrink-0 gap-2">
-          <Button variant="secondary" onClick={() => downloadExport("excel")} className="w-28">
+          <Button
+            variant="secondary"
+            loading={exportLoading === "excel"}
+            disabled={exportLoading !== null}
+            onClick={async () => {
+              setExportLoading("excel");
+              try {
+                await downloadExport("excel");
+                toast.success("✓ Excel file downloaded successfully!");
+              } catch (error) {
+                const errorMessage = error.message || "Failed to download Excel file";
+                console.error("[Excel Download Error]", errorMessage, error);
+                toast.error(errorMessage);
+              } finally {
+                setExportLoading(null);
+              }
+            }}
+            className="w-28"
+          >
             <FiDownload /> Excel
           </Button>
-          <Button variant="secondary" onClick={() => downloadExport("csv")} className="w-28">
-            <FiDownload /> CSV
+          <Button
+            variant="secondary"
+            loading={exportLoading === "pdf"}
+            disabled={exportLoading !== null}
+            onClick={async () => {
+              setExportLoading("pdf");
+              try {
+                await downloadExport("pdf");
+                toast.success("✓ PDF file downloaded successfully!");
+              } catch (error) {
+                const errorMessage = error.message || "Failed to download PDF file";
+                console.error("[PDF Download Error]", errorMessage, error);
+                toast.error(errorMessage);
+              } finally {
+                setExportLoading(null);
+              }
+            }}
+            className="w-28"
+          >
+            <FiDownload /> PDF
           </Button>
         </div>
       </div>

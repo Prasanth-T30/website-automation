@@ -24,8 +24,8 @@ from app.services.registration_service import (
     approve_registration,
     create_registration,
     delete_registration,
-    export_to_csv,
     export_to_excel,
+    export_to_pdf,
     get_registration_or_404,
     list_registrations,
     reject_registration,
@@ -145,11 +145,11 @@ async def export_excel(admin: dict = Depends(get_current_admin)):
     )
 
 
-@router.get("/export/csv")
-async def export_csv(admin: dict = Depends(get_current_admin)):
-    content = await export_to_csv()
+@router.get("/export/pdf")
+async def export_pdf(admin: dict = Depends(get_current_admin)):
+    content = await export_to_pdf()
     return StreamingResponse(
         io.BytesIO(content),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=registrations.csv"},
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=registrations.pdf"},
     )

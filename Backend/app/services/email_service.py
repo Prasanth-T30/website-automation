@@ -1,8 +1,10 @@
 """SMTP email delivery (Brevo) with optional PDF attachment support."""
 import html
 import logging
+import os
 import smtplib
 from email.mime.application import MIMEApplication
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -28,12 +30,34 @@ def normalize_email_body(body: str) -> str:
     return "<p>" + "</p><p>".join(paragraph.replace("\n", "<br>") for paragraph in paragraphs) + "</p>"
 
 
+def _logo_image_part() -> MIMEImage | None:
+    """Return the branded DVein logo as an email inline attachment."""
+    logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "dvein_logo.png")
+    try:
+        with open(logo_path, "rb") as logo_file:
+            image = MIMEImage(logo_file.read(), _subtype="png")
+    except OSError:
+        return None
+
+    image.add_header("Content-ID", "<dvein-logo>")
+    image.add_header("Content-Disposition", "inline", filename="dvein_logo.png")
+    return image
+
+
 def _build_message(to_email: str, subject: str, body_html: str) -> MIMEMultipart:
     msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_FROM_EMAIL}>"
     msg["To"] = to_email
-    msg.attach(MIMEText(normalize_email_body(body_html), "html"))
+
+    html_part = MIMEMultipart("related")
+    html_part.attach(MIMEText(normalize_email_body(body_html), "html"))
+
+    image_part = _logo_image_part()
+    if image_part is not None:
+        html_part.attach(image_part)
+
+    msg.attach(html_part)
     return msg
 
 
@@ -93,6 +117,7 @@ _EMAIL_WRAPPER = """
                style="background-color: #FFFFFF; border-radius: 8px; overflow: hidden; border: 1px solid #E3E7EF;">
           <tr>
             <td style="background-color: #3569AC; padding: 18px 28px;">
+              <img src="cid:dvein-logo" alt="DVein Innovations" style="display: block; max-height: 34px; width: auto; margin: 0 0 10px 0; border: 0;" />
               <span style="color: #FFFFFF; font-size: 18px; font-weight: bold; letter-spacing: 0.3px;">
                 DVein Innovations Pvt. Ltd.
               </span>
@@ -115,6 +140,10 @@ _EMAIL_WRAPPER = """
   </table>
 </div>
 """
+
+
+def _render_email_wrapper(content: str) -> str:
+    return _EMAIL_WRAPPER.replace("__CONTENT__", content)
 
 
 def _display_name(reg: dict) -> str:
@@ -146,7 +175,7 @@ def render_approval_body(reg: dict, custom_body: str | None = None) -> str:
         <p style="margin: 0 0 14px 0; white-space: pre-line;">{body_text.replace(chr(10), '<br/>')}</p>
         <p style="margin: 0;">Thank you,<br/><strong>Training Team</strong></p>
     """
-    return _EMAIL_WRAPPER.replace("__CONTENT__", content)
+    return _render_email_wrapper(content)
 
 
 def render_rejection_body(reg: dict, reason: str) -> str:
@@ -167,4 +196,4 @@ def render_rejection_body(reg: dict, reason: str) -> str:
         </table>
         <p style="margin: 0;">Thank you,<br/><strong>Training Team</strong></p>
     """
-    return _EMAIL_WRAPPER.replace("__CONTENT__", content)
+    return _render_email_wrapper(content)
