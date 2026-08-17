@@ -4,7 +4,7 @@ export const CATEGORY_CHOICES = ["Internship", "Course", "Project"];
 export const CATEGORY_LABELS = {
   Internship: { section: "Internship Information", domainField: "Domain" },
   Course: { section: "Course Information", domainField: "Course Name" },
-  Project: { section: "Project Information", domainField: "Project Name" },
+  Project: { section: "Project Information", domainField: "Domain Name" },
 };
 
 export const DOMAIN_CHOICES = [

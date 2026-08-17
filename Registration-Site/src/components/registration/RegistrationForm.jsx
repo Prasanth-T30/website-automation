@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
-import { FiBookOpen, FiBriefcase, FiCheck, FiCode, FiUser } from "react-icons/fi";
+import { FiBookOpen, FiBriefcase, FiCheck, FiCode, FiUser, FiX } from "react-icons/fi";
 import { toast } from "react-toastify";
 import ReactDatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
@@ -16,6 +16,8 @@ import Input from "../common/Input";
 import { CATEGORY_LABELS, DOMAIN_CHOICES, DURATION_CHOICES, MODE_CHOICES, TITLE_CHOICES, YEAR_CHOICES } from "../../utils/constants";
 import { submitRegistration } from "../../services/registrationService";
 import { useAutofillSync } from "../../hooks/useAutofillSync";
+import { verifyPaymentScreenshot } from "../../utils/paymentVerification";
+import { isValidEmail, isValidPhone } from "../../utils/validators";
 import PaymentUpload from "./PaymentUpload";
 
 // Converts a Date (or date-like value) to a "yyyy-MM-dd" string for form/API use.
@@ -36,11 +38,6 @@ const fromISODate = (value) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
-const isValidEmail = (value) => {
-  if (!value) return false;
-  return /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(value.trim());
-};
-
 const CATEGORY_CARDS = [
   { value: "Internship", title: "Internship", note: "Hands-on placement with a mentor", icon: FiBriefcase, accent: "from-primary-500 to-accent-500" },
   { value: "Course", title: "Course", note: "Structured training programme with placement", icon: FiBookOpen, accent: "from-[#6A5AE0] to-accent-500" },
@@ -59,6 +56,8 @@ const RegistrationForm = () => {
   const [file, setFile] = useState(null);
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [resultOverlay, setResultOverlay] = useState(null); // { status: "success" | "failure", message }
   const formRef = useRef(null);
   const startDatePickerRef = useRef(null);
   const endDatePickerRef = useRef(null);
@@ -66,6 +65,7 @@ const RegistrationForm = () => {
     register,
     handleSubmit,
     setValue,
+    getValues,
     trigger,
     watch,
     formState: { errors },
@@ -81,13 +81,21 @@ const RegistrationForm = () => {
   const selectedCategory = watch("category") || "Internship";
   const categoryLabels = CATEGORY_LABELS[selectedCategory] || CATEGORY_LABELS.Internship;
   const isProfessional = applicantType === "professional";
+  const isProjectCategory = selectedCategory === "Project";
   const progress = `${(step / STEPS.length) * 100}%`;
+
+  // Working professionals only register for a Course or a Project — Internship is student-only.
+  const categoryCardOptions = isProfessional ? CATEGORY_CARDS.filter((card) => card.value !== "Internship") : CATEGORY_CARDS;
+
+  useEffect(() => {
+    if (isProfessional && selectedCategory === "Internship") {
+      setValue("category", "Course", { shouldValidate: true, shouldDirty: true });
+    }
+  }, [isProfessional, selectedCategory, setValue]);
 
   const startDateValue = watch("start_date");
   const durationValue = watch("duration");
   const endDateValue = watch("end_date");
-  const emailValue = watch("email") || "";
-  const isEmailVerified = isValidEmail(emailValue);
 
   // Auto-calculate the end date whenever both a start date and a duration are chosen.
   useEffect(() => {
@@ -101,28 +109,26 @@ const RegistrationForm = () => {
     setValue("end_date", toISODate(end), { shouldValidate: true, shouldDirty: true });
   }, [startDateValue, durationValue, setValue]);
 
+  // Project registrations don't ask for duration/dates/mode, but the backend still expects
+  // those fields to be present — quietly fill in sensible defaults behind the scenes.
+  useEffect(() => {
+    if (!isProjectCategory) return;
+    const values = getValues();
+    if (!values.duration) setValue("duration", DURATION_CHOICES[0]);
+    if (!values.start_date) setValue("start_date", toISODate(new Date()));
+    if (!values.mode) setValue("mode", "Online");
+  }, [isProjectCategory, getValues, setValue]);
+
   const stepFields = useMemo(() => ({
     1: ["title", "name", "email", "phone", "college", "place"],
     2: ["category"],
-    3: ["domain", "duration", "start_date", "end_date", "mode"],
+    3: isProjectCategory ? ["project_topic", "domain"] : ["domain", "duration", "start_date", "end_date", "mode"],
     4: ["amount", "transaction_id", "declaration"],
-  }), []);
+  }), [isProjectCategory]);
 
   const phoneField = register("phone", {
     required: "Mobile number is required",
-    pattern: { value: /^[0-9]{10}$/, message: "Enter a valid 10-digit mobile number" },
-  });
-
-  const emailField = register("email", {
-    required: "Email is required",
-    validate: (value) => {
-      const email = value?.trim();
-      if (!email) return "Email is required";
-      if (!/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(email)) {
-        return "Enter a valid email address";
-      }
-      return true;
-    },
+    validate: (value) => isValidPhone(value) || "Enter a valid email or mobile number",
   });
 
   const goNext = async () => {
@@ -145,6 +151,25 @@ const RegistrationForm = () => {
       return;
     }
 
+    // Check the payment screenshot against the typed amount and UPI transaction ID.
+    // The registration only proceeds once at least two of the three checks pass
+    // (looks like a real payment screenshot, amount matches, transaction ID matches).
+    setVerifying(true);
+    let verification;
+    try {
+      verification = await verifyPaymentScreenshot(file, values.amount, values.transaction_id);
+    } finally {
+      setVerifying(false);
+    }
+
+    if (!verification.isValid) {
+      setResultOverlay({
+        status: "failure",
+        message: "We couldn't verify this payment screenshot against the amount and UPI transaction ID you entered. Please double-check them and try again.",
+      });
+      return;
+    }
+
     const formData = new FormData();
     Object.entries(values).forEach(([key, value]) => {
       formData.append(key, key === "declaration" ? (value ? "true" : "false") : value ?? "");
@@ -154,9 +179,26 @@ const RegistrationForm = () => {
     setSubmitting(true);
     try {
       const registration = await submitRegistration(formData);
-      navigate("/success", { state: { registration } });
+      setResultOverlay({ status: "success", message: "Your registration has been submitted successfully." });
+      setTimeout(() => navigate("/success", { state: { registration } }), 1800);
     } catch (err) {
-      const message = err?.response?.data?.detail || err?.response?.data?.message || "Registration failed. Please try again.";
+      // Log the full error so it shows up in the browser console for debugging —
+      // the toast only has room for a short, human-readable summary.
+      console.error("Registration submission failed:", err);
+
+      let message = "Registration failed. Please try again.";
+      if (err?.response) {
+        // The server responded, but with an error — surface whatever detail it sent.
+        const detail = err.response.data?.detail;
+        message =
+          (typeof detail === "string" && detail) ||
+          err.response.data?.message ||
+          `Registration failed (server responded with status ${err.response.status}).`;
+      } else if (err?.request) {
+        // The request was sent but no response ever came back — almost always means
+        // the backend isn't running, is unreachable, or blocked the request (e.g. CORS).
+        message = "Could not reach the server. Please make sure the backend is running, then try again.";
+      }
       toast.error(message);
     } finally {
       setSubmitting(false);
@@ -165,6 +207,29 @@ const RegistrationForm = () => {
 
   return (
     <form ref={formRef} onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      {resultOverlay && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-8 text-center shadow-2xl">
+            <span
+              className={`mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full ${
+                resultOverlay.status === "success" ? "bg-emerald-100 text-emerald-600" : "bg-red-100 text-red-600"
+              }`}
+            >
+              {resultOverlay.status === "success" ? <FiCheck size={28} /> : <FiX size={28} />}
+            </span>
+            <h3 className="text-lg font-extrabold text-[#0F1B2D]">
+              {resultOverlay.status === "success" ? "Registration Successful" : "Registration Failed"}
+            </h3>
+            {resultOverlay.message && <p className="mt-2 text-sm font-medium text-[#6B7A90]">{resultOverlay.message}</p>}
+            {resultOverlay.status === "failure" && (
+              <Button type="button" className="mt-5 w-full" onClick={() => setResultOverlay(null)}>
+                Try Again
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div>
         <div className="mb-3 flex items-center justify-between">
           <span className="text-[11px] font-extrabold uppercase tracking-[.12em] text-[#8494A9]">Step {step} of 4</span>
@@ -220,16 +285,17 @@ const RegistrationForm = () => {
               {TITLE_CHOICES.map((t) => <option key={t} value={t}>{t}</option>)}
             </Input>
             <Input label="Full Name" required placeholder="Enter full name" error={errors.name?.message} {...register("name", { required: "Full name is required" })} />
-            <div>
-              <Input label="Email" type="email" required placeholder="you@example.com" error={errors.email?.message} {...emailField} />
-              {emailValue !== "" && (
-                <div className="mt-2 flex items-center gap-2">
-                  <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold ${isEmailVerified ? "bg-[#EAF9F2] text-[#1C8C5C]" : "bg-[#FDECEC] text-[#C2453F]"}`}>
-                    {isEmailVerified ? "✓ Verified" : "✕ Invalid email"}
-                  </span>
-                </div>
-              )}
-            </div>
+            <Input
+              label="Email"
+              type="email"
+              required
+              placeholder="you@example.com"
+              error={errors.email?.message}
+              {...register("email", {
+                required: "Email is required",
+                validate: (value) => isValidEmail(value) || "Enter a valid email or mobile number",
+              })}
+            />
             <Input
               label="Mobile Number"
               required
@@ -272,7 +338,7 @@ const RegistrationForm = () => {
           <h2 className="mb-1 text-base font-extrabold text-[#0F1B2D]">Choose your category</h2>
           <p className="mb-4 text-xs font-medium text-[#6B7A90]">This decides the programme details we ask for next.</p>
           <div className="grid grid-cols-1 gap-3">
-            {CATEGORY_CARDS.map(({ value, title, note, icon: Icon, accent }) => {
+            {categoryCardOptions.map(({ value, title, note, icon: Icon, accent }) => {
               const active = selectedCategory === value;
               return (
                 <button
@@ -304,82 +370,106 @@ const RegistrationForm = () => {
       {step === 3 && (
         <section className="dv-section">
           <h2 className="mb-1 text-base font-extrabold text-[#0F1B2D]">{categoryLabels.section}</h2>
-          <p className="mb-4 text-xs font-medium text-[#6B7A90]">Choose the domain, duration, and dates for this registration.</p>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Input as="select" label={categoryLabels.domainField} required error={errors.domain?.message} {...register("domain", { required: `Please select a ${categoryLabels.domainField.toLowerCase()}` })}>
-              <option value="">Select {categoryLabels.domainField.toLowerCase()}</option>
-              {DOMAIN_CHOICES.map((d) => <option key={d} value={d}>{d}</option>)}
-            </Input>
-            <Input as="select" label="Duration" required error={errors.duration?.message} {...register("duration", { required: "Please select a duration" })}>
-              <option value="">Select duration</option>
-              {DURATION_CHOICES.map((d) => <option key={d} value={d}>{d}</option>)}
-            </Input>
+          <p className="mb-4 text-xs font-medium text-[#6B7A90]">
+            {isProjectCategory ? "Tell us about the project you'd like to build." : "Choose the domain, duration, and dates for this registration."}
+          </p>
 
-            <div>
-              <span className="dv-label">
-                Start Date <span className="text-[#DC5B5B]">*</span>
-              </span>
-              <DatePicker
-                ref={startDatePickerRef}
-                selected={fromISODate(startDateValue)}
-                onChange={(date) => setValue("start_date", toISODate(date), { shouldValidate: true, shouldDirty: true })}
-                dateFormat="dd-MM-yyyy"
-                placeholderText="dd-mm-yyyy"
-                className="input-base w-full"
-                wrapperClassName="w-full"
-                minDate={new Date()}
-              >
-                <div className="flex justify-end border-t border-[#E7EDF5] px-1 pb-1 pt-2">
-                  <button
-                    type="button"
-                    className="rounded-md bg-primary-500 px-3 py-1 text-xs font-bold text-white"
-                    onClick={() => startDatePickerRef.current?.setOpen(false)}
-                  >
-                    OK
-                  </button>
-                </div>
-              </DatePicker>
-              <input type="hidden" {...register("start_date", { required: "Start date is required" })} />
-              {errors.start_date?.message && <p className="mt-1 text-xs font-medium text-[#C2453F]">{errors.start_date.message}</p>}
+          {isProjectCategory ? (
+            <div className="mx-auto grid max-w-md grid-cols-1 gap-4">
+              <Input
+                label="Project Topic"
+                required
+                placeholder="Enter your project topic"
+                error={errors.project_topic?.message}
+                {...register("project_topic", { required: "Project topic is required" })}
+              />
+              <Input as="select" label="Domain Name" required error={errors.domain?.message} {...register("domain", { required: "Please select a domain" })}>
+                <option value="">Select domain name</option>
+                {DOMAIN_CHOICES.map((d) => <option key={d} value={d}>{d}</option>)}
+              </Input>
+              {/* Kept for backend compatibility (auto-filled with defaults) — not shown for Project registrations. */}
+              <input type="hidden" {...register("duration")} />
+              <input type="hidden" {...register("start_date")} />
+              <input type="hidden" {...register("end_date")} />
+              <input type="hidden" {...register("mode")} />
             </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Input as="select" label={categoryLabels.domainField} required error={errors.domain?.message} {...register("domain", { required: `Please select a ${categoryLabels.domainField.toLowerCase()}` })}>
+                <option value="">Select {categoryLabels.domainField.toLowerCase()}</option>
+                {DOMAIN_CHOICES.map((d) => <option key={d} value={d}>{d}</option>)}
+              </Input>
+              <Input as="select" label="Duration" required error={errors.duration?.message} {...register("duration", { required: "Please select a duration" })}>
+                <option value="">Select duration</option>
+                {DURATION_CHOICES.map((d) => <option key={d} value={d}>{d}</option>)}
+              </Input>
 
-            <div>
-              <span className="dv-label">
-                End Date <span className="text-[#DC5B5B]">*</span>
-              </span>
-              <DatePicker
-                ref={endDatePickerRef}
-                selected={fromISODate(endDateValue)}
-                onChange={(date) => setValue("end_date", toISODate(date), { shouldValidate: true, shouldDirty: true })}
-                dateFormat="dd-MM-yyyy"
-                placeholderText="dd-mm-yyyy"
-                className="input-base w-full"
-                wrapperClassName="w-full"
-                minDate={fromISODate(startDateValue) || new Date()}
-              >
-                <div className="flex justify-end border-t border-[#E7EDF5] px-1 pb-1 pt-2">
-                  <button
-                    type="button"
-                    className="rounded-md bg-primary-500 px-3 py-1 text-xs font-bold text-white"
-                    onClick={() => endDatePickerRef.current?.setOpen(false)}
-                  >
-                    OK
-                  </button>
+              <div>
+                <span className="dv-label">
+                  Start Date <span className="text-[#DC5B5B]">*</span>
+                </span>
+                <DatePicker
+                  ref={startDatePickerRef}
+                  selected={fromISODate(startDateValue)}
+                  onChange={(date) => setValue("start_date", toISODate(date), { shouldValidate: true, shouldDirty: true })}
+                  dateFormat="dd-MM-yyyy"
+                  placeholderText="dd-mm-yyyy"
+                  className="input-base w-full"
+                  wrapperClassName="w-full"
+                  minDate={new Date()}
+                >
+                  <div className="flex justify-end border-t border-[#E7EDF5] px-1 pb-1 pt-2">
+                    <button
+                      type="button"
+                      className="rounded-md bg-primary-500 px-3 py-1 text-xs font-bold text-white"
+                      onClick={() => startDatePickerRef.current?.setOpen(false)}
+                    >
+                      OK
+                    </button>
+                  </div>
+                </DatePicker>
+                <input type="hidden" {...register("start_date", { required: "Start date is required" })} />
+                {errors.start_date?.message && <p className="mt-1 text-xs font-medium text-[#C2453F]">{errors.start_date.message}</p>}
+              </div>
+
+              <div>
+                <span className="dv-label">
+                  End Date <span className="text-[#DC5B5B]">*</span>
+                </span>
+                <DatePicker
+                  ref={endDatePickerRef}
+                  selected={fromISODate(endDateValue)}
+                  onChange={(date) => setValue("end_date", toISODate(date), { shouldValidate: true, shouldDirty: true })}
+                  dateFormat="dd-MM-yyyy"
+                  placeholderText="dd-mm-yyyy"
+                  className="input-base w-full"
+                  wrapperClassName="w-full"
+                  minDate={fromISODate(startDateValue) || new Date()}
+                >
+                  <div className="flex justify-end border-t border-[#E7EDF5] px-1 pb-1 pt-2">
+                    <button
+                      type="button"
+                      className="rounded-md bg-primary-500 px-3 py-1 text-xs font-bold text-white"
+                      onClick={() => endDatePickerRef.current?.setOpen(false)}
+                    >
+                      OK
+                    </button>
+                  </div>
+                </DatePicker>
+                <input type="hidden" {...register("end_date", { required: "End date is required" })} />
+                {errors.end_date?.message && <p className="mt-1 text-xs font-medium text-[#C2453F]">{errors.end_date.message}</p>}
+              </div>
+
+              <div className="flex justify-center sm:col-span-2">
+                <div className="w-full sm:w-1/2">
+                  <Input as="select" label="Mode" required error={errors.mode?.message} {...register("mode", { required: "Please select a mode" })}>
+                    <option value="">Select mode</option>
+                    {MODE_CHOICES.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </Input>
                 </div>
-              </DatePicker>
-              <input type="hidden" {...register("end_date", { required: "End date is required" })} />
-              {errors.end_date?.message && <p className="mt-1 text-xs font-medium text-[#C2453F]">{errors.end_date.message}</p>}
-            </div>
-
-            <div className="flex justify-center sm:col-span-2">
-              <div className="w-full sm:w-1/2">
-                <Input as="select" label="Mode" required error={errors.mode?.message} {...register("mode", { required: "Please select a mode" })}>
-                  <option value="">Select mode</option>
-                  {MODE_CHOICES.map((m) => <option key={m} value={m}>{m}</option>)}
-                </Input>
               </div>
             </div>
-          </div>
+          )}
         </section>
       )}
 
@@ -408,17 +498,12 @@ const RegistrationForm = () => {
           Back
         </Button>
         {step < 4 ? (
-          <Button
-            type="button"
-            onClick={goNext}
-            disabled={step === 1 && !isEmailVerified}
-            className={step === 1 && !isEmailVerified ? "cursor-not-allowed opacity-60" : ""}
-          >
+          <Button type="button" onClick={goNext}>
             Continue
           </Button>
         ) : (
-          <Button type="submit" loading={submitting}>
-            Submit registration
+          <Button type="submit" loading={submitting || verifying}>
+            {verifying ? "Verifying payment..." : "Submit registration"}
           </Button>
         )}
       </div>
