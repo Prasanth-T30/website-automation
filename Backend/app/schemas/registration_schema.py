@@ -14,8 +14,8 @@ class RegistrationCreate(BaseModel):
     name: str = Field(min_length=2, max_length=100)
     email: EmailStr
     phone: str = Field(min_length=10, max_length=15)
-    college: str = Field(min_length=2, max_length=150)
-    place: str = Field(min_length=2, max_length=100)
+    college: str = Field(min_length=1, max_length=150)
+    place: str = Field(min_length=1, max_length=100)
     department: Optional[str] = None
     year: Optional[str] = None
     applicant_type: str = "student"

@@ -8,8 +8,8 @@ registration data.
 
 Drop this file into:  Backend/app/services/pdf_service.py
 Assets required (ship alongside this file, e.g. Backend/app/assets/):
-    - dvein_logo.png       (logo + wordmark, transparent background)
-    - signature.png        (Executive Head signature, transparent background)
+    - picture1.png         (logo + wordmark, transparent background)
+    - sign1.jpg            (Executive Head signature, transparent background)
 
 Usage (called from registration_service.py / routes/registration.py on Approve):
 
@@ -63,8 +63,8 @@ BRAND_GREY = HexColor("#4A4A4A")   # secondary text
 PAGE_W, PAGE_H = A4  # 595.27 x 841.89 pt
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets")
-LOGO_PATH = os.path.join(ASSETS_DIR, "dvein_logo.png")
-SIGNATURE_PATH = os.path.join(ASSETS_DIR, "signature.png")
+LOGO_PATH = os.path.join(ASSETS_DIR, "picture1.png")
+SIGNATURE_PATH = os.path.join(ASSETS_DIR, "sign1.jpg")
 
 COMPANY_NAME = "DVein Innovations Pvt. Ltd."
 COMPANY_ADDRESS_LINES = [

@@ -53,10 +53,7 @@ def _build_message(to_email: str, subject: str, body_html: str) -> MIMEMultipart
     html_part = MIMEMultipart("related")
     html_part.attach(MIMEText(normalize_email_body(body_html), "html"))
 
-    image_part = _logo_image_part()
-    if image_part is not None:
-        html_part.attach(image_part)
-
+    # No longer attaching image file since we're using inline SVG icon
     msg.attach(html_part)
     return msg
 
@@ -117,7 +114,24 @@ _EMAIL_WRAPPER = """
                style="background-color: #FFFFFF; border-radius: 8px; overflow: hidden; border: 1px solid #E3E7EF;">
           <tr>
             <td style="background-color: #3569AC; padding: 18px 28px;">
-              <img src="cid:dvein-logo" alt="DVein Innovations" style="display: block; max-height: 34px; width: auto; margin: 0 0 10px 0; border: 0;" />
+              <svg width="32" height="32" viewBox="0 0 32 32" style="display: block; margin: 0 0 10px 0; border: 0;" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#00D9FF;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#0066CC;stop-opacity:1" />
+                  </linearGradient>
+                  <linearGradient id="grad2" x1="0%" y1="100%" x2="100%" y2="0%">
+                    <stop offset="0%" style="stop-color:#00FF00;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#90EE90;stop-opacity:1" />
+                  </linearGradient>
+                </defs>
+                <!-- Blue outer ring -->
+                <path d="M 8 16 Q 8 10 14 8 L 18 6 Q 26 4 28 12 Q 30 18 28 24 Q 26 28 20 28 L 16 28 Q 10 26 8 20" fill="url(#grad1)" />
+                <!-- Green accent -->
+                <path d="M 4 24 Q 2 18 6 14 L 10 12 Q 14 14 12 20 Q 10 24 6 26" fill="url(#grad2)" />
+                <!-- Center circle -->
+                <circle cx="18" cy="14" r="4" fill="#00D9FF" />
+              </svg>
               <span style="color: #FFFFFF; font-size: 18px; font-weight: bold; letter-spacing: 0.3px;">
                 DVein Innovations Pvt. Ltd.
               </span>
