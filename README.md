@@ -161,7 +161,15 @@ pnpm deploy:api
 ```
 
 ```bash
-# 4. Lock the database down, then publish both sites.
+# 4. Confirm the deployed service can actually reach the real project.
+#    Does a write/read/delete round trip against Firestore and Storage, and
+#    exits non-zero if either fails, so it can gate a release.
+gcloud run services proxy dvein-hrm-api --region asia-south1 &
+cd backend && uv run python -m app.cli check
+```
+
+```bash
+# 5. Lock the database down, then publish both sites.
 pnpm deploy
 ```
 
