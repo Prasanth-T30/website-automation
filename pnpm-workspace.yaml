@@ -12,3 +12,6 @@ allowBuilds:
   # re2 is a native regex engine with a pure-JS fallback; compiling it needs a
   # full C++ toolchain, which is not worth requiring just to run emulators.
   re2: false
+  # Its install script only downloads the OCR worker/WASM assets it ships with;
+  # the payment-screenshot check runs entirely in the visitor's browser.
+  tesseract.js: true

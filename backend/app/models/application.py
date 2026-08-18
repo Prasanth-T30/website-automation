@@ -39,6 +39,13 @@ class Application:
 
     declaration: bool
 
+    # Added when the public form gained them. Optional because applications
+    # taken before that exist without them, and because the two are mutually
+    # exclusive in practice: a Project registration asks for a topic and no
+    # mode, everything else asks for a mode and no topic.
+    mode: str | None = None  # "Online" | "Offline"
+    project_topic: str | None = None
+
     status: str = "pending"  # pending -> claimed -> approved | rejected
     owner_id: str | None = None
     claimed_at: datetime | None = None
@@ -77,6 +84,8 @@ class Application:
             transaction_id=data["transaction_id"],
             payment_screenshot=data.get("payment_screenshot"),
             declaration=data.get("declaration", False),
+            mode=data.get("mode"),
+            project_topic=data.get("project_topic"),
             status=data.get("status", "pending"),
             owner_id=data.get("owner_id"),
             claimed_at=data.get("claimed_at"),

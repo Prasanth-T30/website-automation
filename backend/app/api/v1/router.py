@@ -25,6 +25,8 @@ api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth.router)
 api_router.include_router(admin_users.router)
 api_router.include_router(public.router)
+# Legacy `/register` path the deployed registration site still posts to.
+api_router.include_router(public.compat_router)
 api_router.include_router(applications.router)
 api_router.include_router(students.router)
 api_router.include_router(batches.router)

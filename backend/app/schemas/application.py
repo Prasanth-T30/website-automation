@@ -15,7 +15,9 @@ from app.core.constants import (
     CATEGORY_CHOICES,
     DOMAIN_CHOICES,
     DURATION_CHOICES,
+    MODE_CHOICES,
     TITLE_CHOICES,
+    canonical_domain,
 )
 
 
@@ -42,6 +44,21 @@ class ApplicationCreate(BaseModel):
     # the client — a filename can't be trusted as a request field.
 
     declaration: bool
+
+    # The public form asks for a delivery mode on every category except
+    # Project, and a topic only on Project. Both optional so neither branch of
+    # the form has to send a field it never collected.
+    mode: str | None = None
+    project_topic: str | None = Field(default=None, max_length=200)
+
+    @field_validator("mode")
+    @classmethod
+    def _validate_mode(cls, v: str | None) -> str | None:
+        if v in (None, ""):
+            return None
+        if v not in MODE_CHOICES:
+            raise ValueError(f"mode must be one of {MODE_CHOICES}")
+        return v
 
     @field_validator("applicant_type")
     @classmethod
@@ -71,9 +88,14 @@ class ApplicationCreate(BaseModel):
     @field_validator("domain")
     @classmethod
     def _validate_domain(cls, v: str) -> str:
-        if v not in DOMAIN_CHOICES:
+        # The deployed form still offers the older, narrower domain list, so a
+        # live submission can name a programme by its retired label. Translate
+        # it rather than rejecting a paid registration over a renamed course;
+        # anything genuinely unknown is still refused.
+        canonical = canonical_domain(v)
+        if canonical not in DOMAIN_CHOICES:
             raise ValueError(f"domain must be one of {DOMAIN_CHOICES}")
-        return v
+        return canonical
 
     @field_validator("duration")
     @classmethod
@@ -120,6 +142,8 @@ class ApplicationOut(BaseModel):
     amount: float
     transaction_id: str
     payment_screenshot: str | None = None
+    mode: str | None = None
+    project_topic: str | None = None
     status: str
     owner_id: str | None = None
     claimed_at: datetime | None = None

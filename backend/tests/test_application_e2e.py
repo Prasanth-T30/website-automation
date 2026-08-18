@@ -253,3 +253,89 @@ def test_list_applications_mine_filter(client: TestClient, user_repo):
     assert mine.status_code == 200
     ids = {a["id"] for a in mine.json()}
     assert app_id in ids
+
+
+def _live_site_payload(**overrides) -> dict:
+    """Exactly what dveinweb-automation.vercel.app posts.
+
+    Note `salutation` rather than `title`, the `mode` and `project_topic`
+    fields, and a domain from the older list the deployed site still ships.
+    """
+    form = {
+        "salutation": "Ms.", "name": "Anitha Selvam",
+        "email": f"{_unique('live')}@example.com", "phone": "9876500123",
+        "college": "Kumaraguru College of Technology", "place": "Coimbatore",
+        "department": "CSE", "year": "3rd Year", "applicant_type": "student",
+        "category": "Internship", "domain": "Java", "duration": "30 Days",
+        "mode": "Online",
+        "start_date": "2026-09-01", "end_date": "2026-10-01",
+        "amount": "18000", "transaction_id": _unique("TXN"), "declaration": "true",
+    }
+    form.update(overrides)
+    return form
+
+
+def _shot():
+    return {"payment_screenshot": ("proof.png", io.BytesIO(b"fake"), "image/png")}
+
+
+def test_deployed_site_payload_is_accepted(client: TestClient):
+    """The live form sends `salutation`, not `title`. Rejecting it would drop
+    a paid registration on the floor."""
+    res = client.post("/api/v1/public/applications", data=_live_site_payload(), files=_shot())
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["title"] == "Ms."      # salutation mapped onto title
+    assert body["mode"] == "Online"
+    assert body["status"] == "pending"
+
+
+def test_retired_domain_names_are_translated_not_rejected(client: TestClient):
+    """The deployed site still offers the older domain list."""
+    res = client.post(
+        "/api/v1/public/applications",
+        data=_live_site_payload(domain="Java"), files=_shot(),
+    )
+    assert res.status_code == 201, res.text
+    assert res.json()["domain"] == "Full Stack Java"
+
+
+def test_a_genuinely_unknown_domain_is_still_refused(client: TestClient):
+    res = client.post(
+        "/api/v1/public/applications",
+        data=_live_site_payload(domain="Underwater Basket Weaving"), files=_shot(),
+    )
+    assert res.status_code == 422
+
+
+def test_project_registration_carries_its_topic(client: TestClient):
+    """A Project asks for a topic and no mode; everything else the reverse."""
+    res = client.post(
+        "/api/v1/public/applications",
+        data=_live_site_payload(category="Project", project_topic="Smart attendance tracker"),
+        files=_shot(),
+    )
+    assert res.status_code == 201, res.text
+    assert res.json()["project_topic"] == "Smart attendance tracker"
+
+
+def test_legacy_register_path_reaches_the_same_handler(client: TestClient):
+    """The deployed site posts to /register. It must land in the same claim
+    queue as /public/applications, not a parallel one."""
+    res = client.post("/api/v1/register", data=_live_site_payload(), files=_shot())
+    assert res.status_code == 201, res.text
+    created = res.json()
+
+    listed = client.get("/api/v1/public/choices")  # sanity: app still healthy
+    assert listed.status_code == 200
+    assert created["registration_id"].startswith("REG")
+    assert created["status"] == "pending"
+    assert created["owner_id"] is None
+
+
+def test_mode_must_be_a_real_choice(client: TestClient):
+    res = client.post(
+        "/api/v1/public/applications",
+        data=_live_site_payload(mode="Telepathic"), files=_shot(),
+    )
+    assert res.status_code == 422

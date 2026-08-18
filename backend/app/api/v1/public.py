@@ -59,6 +59,9 @@ async def submit_application(
     applications: ApplicationRepo,
     storage: Storage,
     title: str | None = Form(None),
+    # The deployed form renamed this field to `salutation`. Accept either so a
+    # running site keeps working through a redeploy in whichever order it lands.
+    salutation: str | None = Form(None),
     name: str = Form(...),
     email: str = Form(...),
     phone: str = Form(...),
@@ -75,11 +78,13 @@ async def submit_application(
     amount: float = Form(...),
     transaction_id: str = Form(...),
     declaration: bool = Form(...),
+    mode: str | None = Form(None),
+    project_topic: str | None = Form(None),
     payment_screenshot: UploadFile = File(...),
 ) -> ApplicationOut:
     try:
         data = ApplicationCreate(
-            title=title,
+            title=title or salutation,
             name=name,
             email=email,
             phone=phone,
@@ -96,6 +101,8 @@ async def submit_application(
             amount=amount,
             transaction_id=transaction_id,
             declaration=declaration,
+            mode=mode,
+            project_topic=project_topic,
         )
     except ValidationError as exc:
         raise HTTPException(
@@ -137,3 +144,22 @@ async def submit_application(
         ) from exc
 
     return ApplicationOut.model_validate(created)
+
+
+# ── Compatibility surface for the deployed registration site ────────────────
+# The site at dveinweb-automation.vercel.app posts to `<base>/register`, a path
+# it inherited from the standalone backend this one replaces. Exposing the same
+# handler there means switching that site over is a change of one environment
+# variable, with no redeploy of its code and no window where submissions 404.
+#
+# It is the identical function, not a copy: same validation, same rate limit,
+# same storage write, so the two paths cannot drift apart.
+compat_router = APIRouter(tags=["Public"])
+compat_router.add_api_route(
+    "/register",
+    submit_application,
+    methods=["POST"],
+    response_model=ApplicationOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Submit a registration (legacy path)",
+)

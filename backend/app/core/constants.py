@@ -163,6 +163,10 @@ def canonical_domain(name: str | None) -> str | None:
 
 DURATION_CHOICES = ["15 Days", "30 Days", "45 Days", "60 Days", "90 Days"]
 
+# How the programme is delivered. Asked on every category except Project,
+# which the public form fills in as "Online" behind the scenes.
+MODE_CHOICES = ["Online", "Offline"]
+
 YEAR_CHOICES = ["1st Year", "2nd Year", "3rd Year", "4th Year", "Final Year"]
 
 APPLICATION_STATUS_PENDING = "pending"
