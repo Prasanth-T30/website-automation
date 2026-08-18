@@ -45,6 +45,9 @@ class Application:
     # mode, everything else asks for a mode and no topic.
     mode: str | None = None  # "Online" | "Offline"
     project_topic: str | None = None
+    # Free text the applicant typed under "Other" on the public form —
+    # anything they wanted the team to know that the form doesn't ask for.
+    other: str | None = None
 
     status: str = "pending"  # pending -> claimed -> approved | rejected
     owner_id: str | None = None
@@ -86,6 +89,7 @@ class Application:
             declaration=data.get("declaration", False),
             mode=data.get("mode"),
             project_topic=data.get("project_topic"),
+            other=data.get("other"),
             status=data.get("status", "pending"),
             owner_id=data.get("owner_id"),
             claimed_at=data.get("claimed_at"),

@@ -50,6 +50,9 @@ class ApplicationCreate(BaseModel):
     # the form has to send a field it never collected.
     mode: str | None = None
     project_topic: str | None = Field(default=None, max_length=200)
+    # Optional note from the applicant. Bounded so the public form cannot be
+    # used to write unbounded data into the database.
+    other: str | None = Field(default=None, max_length=1000)
 
     @field_validator("mode")
     @classmethod
@@ -144,6 +147,7 @@ class ApplicationOut(BaseModel):
     payment_screenshot: str | None = None
     mode: str | None = None
     project_topic: str | None = None
+    other: str | None = None
     status: str
     owner_id: str | None = None
     claimed_at: datetime | None = None

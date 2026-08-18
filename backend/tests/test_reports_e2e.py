@@ -324,9 +324,10 @@ def test_each_hr_can_only_certify_their_own_claimed_students(client: TestClient,
     assert client.post(f"/api/v1/students/{sid}/certificate", json={},
                        headers={"X-CSRF-Token": hr_a_csrf}).status_code == 200
 
-    # A colleague sees the student in the shared list but cannot certify them.
+    # A colleague neither sees the student nor can certify them: each HR's
+    # book is their own.
     hr_b_csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
-    assert any(s["id"] == sid for s in client.get("/api/v1/students").json())
+    assert not any(s["id"] == sid for s in client.get("/api/v1/students").json())
     assert client.post(f"/api/v1/students/{sid}/certificate", json={},
                        headers={"X-CSRF-Token": hr_b_csrf}).status_code == 403
     assert client.get(f"/api/v1/students/{sid}/certificate").status_code == 403

@@ -1,8 +1,9 @@
 """Student records — normally created by approving an application, or
 entered by hand for a walk-in who never used the public form.
 
-An HR sees every student (useful for context — batches, colleagues' work)
-but can only mutate the ones they own; admin can act on any.
+An HR works only with the students they claimed: `mine=true` scopes the list,
+and every mutation is owner-gated. Admin sees and acts on all of them, and is
+the only role that can move a student from one HR to another.
 """
 
 from __future__ import annotations
@@ -16,11 +17,13 @@ from fastapi.responses import StreamingResponse
 from app.api.deps import (
     ActiveUser,
     ActivityRepo,
+    AdminUser,
     BatchRepo,
     CurrentUser,
     ReportRepo,
     Storage,
     StudentRepo,
+    UserRepo,
 )
 from app.models.student import Student
 from app.models.user import UserRole
@@ -29,6 +32,7 @@ from app.schemas.student import (
     CertificateIssueResult,
     StudentCreate,
     StudentOut,
+    StudentReassign,
     StudentUpdate,
 )
 from app.services import activity, email
@@ -59,11 +63,22 @@ def _require_owner_or_admin(s: Student, user: CurrentUser) -> None:
 def list_students(
     students: StudentRepo,
     user: CurrentUser,
-    mine: bool = Query(False, description="Only students the caller owns"),
+    mine: bool = Query(False, description="Admin only: narrow to the caller's own students"),
     batch_id: str | None = Query(None),
     no_batch: bool = Query(False, description="Only students not yet assigned to a batch"),
 ) -> list[StudentOut]:
-    owner_id = user.id if mine else None
+    """An HR only ever sees the students they claimed.
+
+    Scoped here rather than at each call site: the console reads this list
+    from half a dozen screens, and a single one forgetting to pass a filter
+    would leak a colleague's book. Admin sees everyone, and can pass
+    `mine=true` to narrow to their own.
+    """
+    if user.role is UserRole.admin:
+        owner_id = user.id if mine else None
+    else:
+        owner_id = user.id
+
     rows = students.list_all(owner_id=owner_id, batch_id=batch_id, no_batch=no_batch)
     return [StudentOut.model_validate(s) for s in rows]
 
@@ -135,6 +150,52 @@ def update_student(
     _require_owner_or_admin(s, user)
 
     updated = students.update(student_id, data.model_dump(exclude_unset=True))
+    return StudentOut.model_validate(updated)
+
+
+@router.post("/{student_id}/reassign", response_model=StudentOut)
+def reassign_student(
+    student_id: str,
+    data: StudentReassign,
+    students: StudentRepo,
+    users: UserRepo,
+    activity_repo: ActivityRepo,
+    admin: AdminUser,
+) -> StudentOut:
+    """Move a student from one HR to another. Admin only.
+
+    Historical payments keep the owner they were recorded against, so past
+    revenue stays with the HR who actually earned it; only future payments and
+    the student's own row follow the new owner. Reassigning would otherwise
+    silently rewrite months of per-HR revenue figures.
+    """
+    student = _get_or_404(students, student_id)
+
+    new_owner = users.get(data.owner_id)
+    if new_owner is None or not new_owner.is_active:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="That staff member does not exist or is inactive."
+        )
+    if student.owner_id == new_owner.id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail=f"{student.name} already belongs to that HR."
+        )
+
+    previous = users.get(student.owner_id)
+    updated = students.update(student_id, {"owner_id": new_owner.id})
+
+    activity.record(
+        activity_repo,
+        action="student.reassigned",
+        actor_id=admin.id,
+        entity_type="student",
+        entity_id=student_id,
+        summary=(
+            f"Reassigned {student.name} from "
+            f"{previous.full_name if previous else 'an unknown HR'} to {new_owner.full_name}"
+        ),
+        meta={"from_owner_id": student.owner_id, "to_owner_id": new_owner.id},
+    )
     return StudentOut.model_validate(updated)
 
 

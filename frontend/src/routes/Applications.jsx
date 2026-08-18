@@ -191,7 +191,20 @@ export default function Applications() {
                           <Badge tone={CATEGORY_TONE[a.category] ?? "brand"}>{a.category}</Badge>
                           <p className="mt-1 text-xs text-fg-secondary">
                             {a.domain} · {a.duration}
+                            {a.mode ? ` · ${a.mode}` : ""}
                           </p>
+                          {a.project_topic && (
+                            <p className="mt-1 text-xs text-fg-muted">Topic: {a.project_topic}</p>
+                          )}
+                          {/* Whatever the applicant typed under "Other". Shown
+                              in full rather than truncated — it is the one place
+                              they can say something the form didn't ask for. */}
+                          {a.other && (
+                            <p className="mt-1.5 max-w-[28ch] rounded-md border-l-2 border-accent bg-subtle px-2 py-1 text-xs break-words text-fg-secondary">
+                              <span className="font-semibold text-fg-muted">Other: </span>
+                              {a.other}
+                            </p>
+                          )}
                         </td>
                         <td className="px-4 py-3 font-semibold text-fg">{money(a.amount)}</td>
                         <td className="px-4 py-3 text-xs text-fg-muted">

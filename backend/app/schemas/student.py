@@ -77,6 +77,18 @@ class StudentUpdate(BaseModel):
     total_fees: float | None = Field(default=None, ge=0)
 
 
+class StudentReassign(BaseModel):
+    """Move a student to a different HR. Admin only.
+
+    Deliberately its own endpoint rather than a field on StudentUpdate: an HR
+    may edit the students they own, and letting ownership ride along on that
+    same call would let one quietly hand their own record to someone else — or
+    take one. Changing who a student belongs to is an administrative act.
+    """
+
+    owner_id: str = Field(min_length=1)
+
+
 class CertificateIssueRequest(BaseModel):
     """Both optional — the defaults are generated from the student record.
 

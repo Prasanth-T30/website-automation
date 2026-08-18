@@ -28,21 +28,23 @@ from app.models.student import Student
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
 TEMPLATE_PATH = ASSETS_DIR / "certificate_bg.jpg"
 
-PAGE_W, PAGE_H = 842.0, 596.0
+PAGE_W, PAGE_H = 842.25, 595.5
 
-# The gold rule the recipient's name is written on.
-RULE_X0, RULE_X1, RULE_Y = 396.0, 725.0, 346.0
+# The gold rule the recipient's name is written on, measured from the supplied
+# artwork so the name lands exactly where the design intends.
+RULE_X0, RULE_X1, RULE_Y = 405.0, 719.0, 357.0
 RULE_MID = (RULE_X0 + RULE_X1) / 2
 
-# Baselines of the original five body lines, 21.9pt apart.
-FIRST_BASELINE = 345.0
-LINE_HEIGHT = 21.9
-BODY_SIZE = 15.9
+# Baselines of the template's own body lines, 21.6pt apart, the first sitting
+# on the name rule.
+FIRST_BASELINE = 357.0
+LINE_HEIGHT = 21.6
+BODY_SIZE = 15.8
 NAME_SIZE = 20.0
-# Four lines of prose sit between the name rule and the signature block; more
-# than that would run into the signature, so the type shrinks instead.
+# Four lines of prose fit between the name rule and the signature block. More
+# would run into the signature, so the type shrinks rather than overflowing.
 MAX_BODY_LINES = 4
-BODY_MAX_WIDTH = 700.0
+BODY_MAX_WIDTH = 720.0
 
 INK = (26, 26, 26)
 MUTED = (120, 120, 120)
@@ -64,7 +66,11 @@ _PROGRAMME_NOUN = {
 
 
 def programme_label(student: Student) -> str:
-    """e.g. "Full Stack Java Internship" — domain plus the enrolment type.
+    """e.g. "Full Stack Java Internship" — the domain plus the enrolment type.
+
+    Both come from what the applicant chose on the registration form. The
+    duration is deliberately left off: the certificate states what was
+    completed, not how long it took.
 
     Falls back to the domain alone for an unrecognised category rather than
     inventing a word for it.
@@ -104,14 +110,31 @@ def _latin1(text: str) -> str:
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
-def _wrap(pdf: FPDF, text: str, max_width: float) -> list[str]:
-    """Greedy word wrap measured in the live font."""
-    words, lines, current = text.split(), [], ""
-    for word in words:
-        candidate = f"{current} {word}".strip()
-        if current and pdf.get_string_width(candidate) > max_width:
+def _styled_width(pdf: FPDF, line: list[tuple[str, str]], size: float) -> float:
+    """Width of one wrapped line, measuring each word in its own weight."""
+    total = 0.0
+    for i, (word, style) in enumerate(line):
+        pdf.set_font("Helvetica", style, size)
+        total += pdf.get_string_width(word + (" " if i < len(line) - 1 else ""))
+    return total
+
+
+def _wrap_styled(
+    pdf: FPDF, words: list[tuple[str, str]], max_width: float, size: float
+) -> list[list[tuple[str, str]]]:
+    """Greedy word wrap over (word, weight) pairs.
+
+    Measures in the weight each word will actually be drawn in — wrapping a
+    mixed-weight sentence on regular-width metrics alone overruns the line
+    wherever the bold run falls.
+    """
+    lines: list[list[tuple[str, str]]] = []
+    current: list[tuple[str, str]] = []
+    for pair in words:
+        candidate = [*current, pair]
+        if current and _styled_width(pdf, candidate, size) > max_width:
             lines.append(current)
-            current = word
+            current = [pair]
         else:
             current = candidate
     if current:
@@ -151,24 +174,38 @@ def build_certificate_pdf(student: Student, batch=None) -> bytes:
         pdf.set_font("Helvetica", "B", size)
     pdf.text(RULE_MID - pdf.get_string_width(name) / 2, RULE_Y - 4, name)
 
-    # ── Body paragraph, with the real programme substituted ──────────────
-    opening = (
-        "recognition of their valuable participation, dedication, and contribution "
-        f"to the {programme_label(student)} conducted by Dvein Innovations."
+    # ── Body paragraph, with the real programme in place of the template's
+    #    bold placeholder ─────────────────────────────────────────────────
+    programme = _latin1(programme_label(student))
+    before = _latin1(
+        "recognition of their valuable participation, dedication, and contribution to the"
+    )
+    after = _latin1(f"conducted by Dvein Innovations. {CLOSING}")
+
+    # Each word carries the weight it should be drawn in, so the programme
+    # stays bold wherever the wrap happens to put it — the template sets it in
+    # bold, and it is the one part of the sentence that changes per student.
+    words = (
+        [(w, "") for w in before.split()]
+        + [(w, "B") for w in programme.split()]
+        + [(w, "") for w in after.split()]
     )
 
     size = BODY_SIZE
     while True:
-        pdf.set_font("Helvetica", "", size)
-        lines = _wrap(pdf, _latin1(opening), BODY_MAX_WIDTH)
-        lines += _wrap(pdf, _latin1(CLOSING), BODY_MAX_WIDTH)
+        lines = _wrap_styled(pdf, words, BODY_MAX_WIDTH, size)
         if len(lines) <= MAX_BODY_LINES or size <= 11:
             break
         size -= 0.5
 
     baseline = FIRST_BASELINE + LINE_HEIGHT
     for line in lines:
-        pdf.text(PAGE_W / 2 - pdf.get_string_width(line) / 2, baseline, line)
+        width = _styled_width(pdf, line, size)
+        x = PAGE_W / 2 - width / 2
+        for word, style in line:
+            pdf.set_font("Helvetica", style, size)
+            pdf.text(x, baseline, word)
+            x += pdf.get_string_width(word + " ")
         baseline += LINE_HEIGHT
 
     # ── Reference line, under the unused right-hand rule ─────────────────

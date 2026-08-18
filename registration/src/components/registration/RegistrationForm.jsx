@@ -486,6 +486,27 @@ const RegistrationForm = () => {
               <PaymentUpload file={file} onChange={setFile} />
             </div>
           </div>
+
+          {/* Free text. Whatever is typed here is shown to the HR reviewing the
+              registration, so an applicant can raise anything the form itself
+              does not ask about. */}
+          <div className="mt-4">
+            <label className="mb-1.5 block text-xs font-bold text-[#0F1B2D]" htmlFor="other">
+              Other
+            </label>
+            <textarea
+              id="other"
+              rows={3}
+              maxLength={1000}
+              placeholder="Anything else you would like us to know (optional)"
+              className="w-full rounded-[14px] border border-[#DCE4EE] bg-white px-4 py-3 text-sm font-medium text-[#0F1B2D] outline-none transition placeholder:text-[#9AA8BC] focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
+              {...register("other", { maxLength: 1000 })}
+            />
+            <p className="mt-1 text-[11px] font-medium text-[#8494A9]">
+              Optional. Our team sees this when reviewing your registration.
+            </p>
+          </div>
+
           <label className="mt-4 flex items-start gap-3 rounded-[14px] border border-[#DCE4EE] bg-white p-4 text-sm font-medium leading-6 text-[#5A6B82]">
             <input type="checkbox" className="mt-1 h-4 w-4 rounded border-[#DCE4EE] text-primary-500 focus:ring-primary-500" {...register("declaration", { required: true })} />
             I confirm that the information provided is correct.

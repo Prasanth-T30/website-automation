@@ -76,8 +76,8 @@ def test_the_supplied_artwork_is_present():
 def test_certificate_is_a_landscape_pdf_matching_the_template(student, batch):
     pdf = build_certificate_pdf(student, batch)
     assert pdf[:5] == b"%PDF-"
-    # The supplied design is A4 landscape, 842 x 596 pt.
-    assert b"842" in pdf[:2000] or b"/MediaBox" in pdf
+    # The supplied design is A4 landscape, 842.25 x 595.5 pt.
+    assert b"/MediaBox" in pdf
 
 
 def test_recipient_name_is_drawn(student, batch):
@@ -92,12 +92,17 @@ def test_programme_replaces_the_bracketed_placeholder(student, batch):
     assert "Training Program]" not in text
 
 
-def test_programme_label_follows_the_enrolment_type(student):
+def test_programme_label_is_domain_and_type_only(student):
+    """Domain plus enrolment type, both from the registration form. The
+    duration is deliberately not on the certificate."""
     assert programme_label(student) == "Full Stack Java Internship"
     student.category = "Course"
     assert programme_label(student) == "Full Stack Java Course"
     student.category = "Project"
     assert programme_label(student) == "Full Stack Java Project"
+
+    student.duration = "90 Days"
+    assert "90 Days" not in programme_label(student)
 
 
 def test_programme_label_falls_back_rather_than_inventing(student):
@@ -154,3 +159,9 @@ def test_filename_is_filesystem_safe(student):
     name = certificate_filename(student)
     assert not set(name) & set(r'/\:*?"<>|')
     assert name.endswith(".pdf")
+
+
+def test_duration_is_never_printed_on_the_certificate(student, batch):
+    """The design states what was completed, not how long it took."""
+    student.duration = "90 Days"
+    assert "90 Days" not in _flowed(build_certificate_pdf(student, batch))

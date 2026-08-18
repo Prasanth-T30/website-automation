@@ -80,6 +80,7 @@ async def submit_application(
     declaration: bool = Form(...),
     mode: str | None = Form(None),
     project_topic: str | None = Form(None),
+    other: str | None = Form(None),
     payment_screenshot: UploadFile = File(...),
 ) -> ApplicationOut:
     try:
@@ -103,6 +104,7 @@ async def submit_application(
             declaration=declaration,
             mode=mode,
             project_topic=project_topic,
+            other=other,
         )
     except ValidationError as exc:
         raise HTTPException(

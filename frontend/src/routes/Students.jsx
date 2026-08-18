@@ -264,6 +264,7 @@ export default function Students() {
             batches={batches.data ?? []}
             ownerName={isAdmin ? ownerName(selected.owner_id) : undefined}
             canRecordPayment={isAdmin || selected.owner_id === user?.id}
+            staff={isAdmin ? (allUsers.data ?? []) : null}
             onUpdated={(s) => setSelected(s)}
           />
         )}
@@ -409,7 +410,7 @@ function AddStudentDialog({ open, onOpenChange, batches }) {
   );
 }
 
-function StudentDetail({ student, batches, ownerName, canRecordPayment, onUpdated }) {
+function StudentDetail({ student, batches, ownerName, canRecordPayment, staff, onUpdated }) {
   const queryClient = useQueryClient();
   const balance = student.total_fees - student.fees_paid;
   const payments = useQuery({
@@ -437,6 +438,18 @@ function StudentDetail({ student, batches, ownerName, canRecordPayment, onUpdate
     },
     onError: (err) => toast.error(err instanceof ApiError ? err.detail : "Could not update batch."),
   });
+  const reassign = useMutation({
+    mutationFn: (owner_id) => studentsApi.reassign(student.id, owner_id),
+    onSuccess: async (updated) => {
+      await queryClient.invalidateQueries({ queryKey: STUDENTS_KEY });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "hr-performance"] });
+      onUpdated(updated);
+      toast.success(`${updated.name} moved to their new HR.`);
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.detail : "Could not reassign the student."),
+  });
+
   const [previewOpen, setPreviewOpen] = useState(false);
   const issueCertificate = useMutation({
     mutationFn: () => studentsApi.issueCertificate(student.id),
@@ -524,6 +537,36 @@ function StudentDetail({ student, batches, ownerName, canRecordPayment, onUpdate
           </select>
         </CardBody>
       </Card>
+
+      {/* Admin only. Moving a student hands the whole record — and every future
+          payment — to another HR, so it is deliberately not something an HR can
+          do to their own book. */}
+      {staff && (
+        <Card>
+          <CardHeader
+            title="Assigned HR"
+            description="Move this student to a different HR. Past payments stay credited to whoever earned them."
+          />
+          <CardBody className="!p-4">
+            <select
+              className="h-10 w-full rounded-md border border-line bg-surface px-3 text-sm text-fg"
+              value={student.owner_id}
+              disabled={reassign.isPending}
+              onChange={(e) => {
+                if (e.target.value !== student.owner_id) reassign.mutate(e.target.value);
+              }}
+            >
+              {staff
+                .filter((u) => u.is_active)
+                .map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name} ({u.role})
+                  </option>
+                ))}
+            </select>
+          </CardBody>
+        </Card>
+      )}
 
       <Card>
         <CardHeader

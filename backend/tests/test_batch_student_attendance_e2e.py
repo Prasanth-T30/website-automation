@@ -300,3 +300,88 @@ def test_hr_cannot_file_a_manual_student_under_another_hr(client: TestClient, us
         headers={"X-CSRF-Token": csrf},
     )
     assert res.status_code == 403
+
+
+def _manual_student(client: TestClient, csrf: str, name: str) -> str:
+    res = client.post(
+        "/api/v1/students",
+        json={
+            "name": name, "email": f"{_unique('own')}@example.com",
+            "phone": "9876543210", "college": "PSG College of Technology",
+            "place": "Coimbatore", "category": "Course",
+            "domain": "Full Stack Java", "duration": "30 Days",
+            "total_fees": 10000, "fees_paid": 0,
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert res.status_code == 201, res.text
+    return res.json()["id"]
+
+
+def test_an_hr_only_sees_the_students_they_own(client: TestClient, user_repo):
+    """Three HRs share one pool, but each works only their own book."""
+    hr_a = _login_as(client, user_repo, role=UserRole.hr)
+    mine = _manual_student(client, hr_a, "Belongs To A")
+
+    hr_b = _login_as(client, user_repo, role=UserRole.hr)
+    theirs = _manual_student(client, hr_b, "Belongs To B")
+
+    # B's list has B's student and not A's.
+    ids = {s["id"] for s in client.get("/api/v1/students").json()}
+    assert theirs in ids
+    assert mine not in ids, "an HR can see a colleague's student"
+
+
+def test_admin_sees_every_hr_s_students(client: TestClient, user_repo):
+    hr = _login_as(client, user_repo, role=UserRole.hr)
+    owned = _manual_student(client, hr, "Visible To Admin")
+
+    _login_as(client, user_repo, role=UserRole.admin)
+    ids = {s["id"] for s in client.get("/api/v1/students").json()}
+    assert owned in ids
+
+
+def test_admin_can_move_a_student_between_hrs(client: TestClient, user_repo):
+    hr_a_csrf = _login_as(client, user_repo, role=UserRole.hr)
+    sid = _manual_student(client, hr_a_csrf, "Gets Reassigned")
+
+    # A second HR to hand them to.
+    hr_b_csrf = _login_as(client, user_repo, role=UserRole.hr)
+    hr_b_id = client.get("/api/v1/auth/me").json()["id"]
+    assert sid not in {s["id"] for s in client.get("/api/v1/students").json()}
+
+    admin_csrf = _login_as(client, user_repo, role=UserRole.admin)
+    moved = client.post(
+        f"/api/v1/students/{sid}/reassign",
+        json={"owner_id": hr_b_id}, headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["owner_id"] == hr_b_id
+
+    # It now shows up for B, and no longer for A.
+    _login_as(client, user_repo, role=UserRole.hr)  # a fresh, unrelated HR
+    assert sid not in {s["id"] for s in client.get("/api/v1/students").json()}
+
+
+def test_an_hr_cannot_reassign_a_student(client: TestClient, user_repo):
+    """Otherwise an HR could hand their own record away, or take a colleague's."""
+    hr_csrf = _login_as(client, user_repo, role=UserRole.hr)
+    sid = _manual_student(client, hr_csrf, "Not Movable By HR")
+
+    res = client.post(
+        f"/api/v1/students/{sid}/reassign",
+        json={"owner_id": "anyone"}, headers={"X-CSRF-Token": hr_csrf},
+    )
+    assert res.status_code == 403
+
+
+def test_reassigning_to_an_unknown_person_is_refused(client: TestClient, user_repo):
+    hr_csrf = _login_as(client, user_repo, role=UserRole.hr)
+    sid = _manual_student(client, hr_csrf, "Stays Put")
+
+    admin_csrf = _login_as(client, user_repo, role=UserRole.admin)
+    res = client.post(
+        f"/api/v1/students/{sid}/reassign",
+        json={"owner_id": "does-not-exist"}, headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert res.status_code == 404
