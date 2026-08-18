@@ -6,6 +6,58 @@
   "storage": {
     "rules": "storage.rules"
   },
+  "hosting": [
+    {
+      "target": "console",
+      "public": "frontend/dist",
+      "predeploy": ["pnpm --dir frontend build"],
+      "ignore": ["**/.*", "**/node_modules/**"],
+      "rewrites": [
+        {
+          "source": "/api/**",
+          "run": { "serviceId": "dvein-hrm-api", "region": "asia-south1" }
+        },
+        { "source": "**", "destination": "/index.html" }
+      ],
+      "headers": [
+        {
+          "source": "/assets/**",
+          "headers": [
+            { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+          ]
+        },
+        {
+          "source": "/index.html",
+          "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
+        }
+      ]
+    },
+    {
+      "target": "registration",
+      "public": "registration/dist",
+      "predeploy": ["pnpm --dir registration build"],
+      "ignore": ["**/.*", "**/node_modules/**"],
+      "rewrites": [
+        {
+          "source": "/api/**",
+          "run": { "serviceId": "dvein-hrm-api", "region": "asia-south1" }
+        },
+        { "source": "**", "destination": "/index.html" }
+      ],
+      "headers": [
+        {
+          "source": "/assets/**",
+          "headers": [
+            { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+          ]
+        },
+        {
+          "source": "/index.html",
+          "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
+        }
+      ]
+    }
+  ],
   "emulators": {
     "firestore": { "port": 8080 },
     "storage": { "port": 9199 },

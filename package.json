@@ -8,7 +8,12 @@
     "emulators:fresh": "firebase emulators:start --only firestore,storage",
     "console": "pnpm --dir frontend dev",
     "registration": "pnpm --dir registration dev",
-    "build": "pnpm --dir frontend build && pnpm --dir registration build"
+    "build": "pnpm --dir frontend build && pnpm --dir registration build",
+
+    "deploy:api": "gcloud run deploy dvein-hrm-api --source ./backend --region asia-south1 --allow-unauthenticated",
+    "deploy:rules": "firebase deploy --only firestore:rules,storage:rules",
+    "deploy:web": "firebase deploy --only hosting",
+    "deploy": "pnpm deploy:rules && pnpm deploy:web"
   },
   "devDependencies": {
     "firebase-tools": "^13.0.0"

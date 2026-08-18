@@ -129,9 +129,67 @@ simpler). Start it on the host first, then:
 docker compose up --build
 ```
 
-`api` reaches the host-run emulator via `host.docker.internal`. For
-staging/production set `FIREBASE_SERVICE_ACCOUNT_PATH` and remove the two
-`*_EMULATOR_HOST` variables to point at a real Firebase project.
+`api` reaches the host-run emulator via `host.docker.internal`.
+
+## Deploying to Firebase
+
+Three pieces, one Firebase project, one Firestore database. Both the console
+and the public form are static sites on Hosting; the API is a container on
+Cloud Run, reached through a Hosting rewrite at `/api/**` so the browser stays
+same-origin and the auth cookies remain first-party.
+
+**Do this once, in order.** The Firestore region is fixed at creation and
+cannot be changed afterwards.
+
+```bash
+# 1. Point the repo at your real project (replaces the demo id).
+firebase use --add            # pick the project, alias it "default"
+```
+
+```bash
+# 2. Create the two Hosting sites and bind them to the targets in firebase.json.
+firebase hosting:sites:create dvein-hrm-console
+firebase hosting:sites:create dvein-hrm-apply
+firebase target:apply hosting console dvein-hrm-console
+firebase target:apply hosting registration dvein-hrm-apply
+```
+
+```bash
+# 3. Deploy the API. Its service account needs Firestore + Storage access;
+#    no key file is involved — Cloud Run supplies credentials ambiently.
+pnpm deploy:api
+```
+
+```bash
+# 4. Lock the database down, then publish both sites.
+pnpm deploy
+```
+
+Set these on the Cloud Run service (not in the image): `JWT_SECRET_KEY`,
+`CORS_ORIGINS`, `PUBLIC_BASE_URL`, `COOKIE_SECURE=true`, `APP_ENV=production`,
+`FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `REPORTING_TIMEZONE`, and the
+`SMTP_*` values. Leave `FIRESTORE_EMULATOR_HOST` and
+`FIREBASE_STORAGE_EMULATOR_HOST` **unset** — with neither those nor a service
+account path, the Admin SDK resolves credentials from the runtime, which is
+what you want on Cloud Run. Keep `JWT_SECRET_KEY` and `SMTP_PASSWORD` in Secret
+Manager and mount them as env vars.
+
+Seed the staff accounts once against production with both seed passwords blank,
+so each account is created with a generated password and must change it at
+first sign-in.
+
+### Pointing the existing Vercel form at this backend
+
+The deployed registration site can keep running on Vercel — the API already
+allows its origin and exposes the `/register` path that site posts to. Change
+one environment variable there:
+
+```
+VITE_API_BASE_URL=https://<your-console-domain>/api/v1
+```
+
+No code change or rebuild of that app is needed. Moving it onto Hosting
+instead (target `registration`) makes it same-origin and removes the CORS hop.
 
 ## Configuration
 
