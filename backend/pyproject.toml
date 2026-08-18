@@ -18,6 +18,10 @@ dependencies = [
     "openpyxl>=3.1",
     "fpdf2>=2.8",
     "orjson>=3.10",
+    # Windows and slim Linux containers ship no system zoneinfo database, so
+    # ZoneInfo("Asia/Kolkata") raises there without this. Monthly revenue
+    # reporting depends on resolving the institute's timezone.
+    "tzdata>=2024.1",
 ]
 
 [dependency-groups]
@@ -34,6 +38,16 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI's Form()/File()/Depends() are designed to be called in argument
+# defaults — that's how the framework wires request parsing to parameters.
+# B008 exists to catch mutable-default bugs, not this idiomatic pattern.
+"app/api/v1/*.py" = ["B008"]
+# Inline-CSS HTML email templates need long attribute strings for
+# email-client compatibility; a `# noqa` can't go inside the triple-quoted
+# string without corrupting the markup.
+"app/services/email.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

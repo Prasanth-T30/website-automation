@@ -27,6 +27,26 @@ test-results/
 var/
 !var/.gitkeep
 
+# ── Logs ──────────────────────────────────────────────
+# The Firebase emulators write multi-megabyte debug logs into the repo root
+# on every run; they are machine-local noise, never a build input.
+*.log
+firebase-debug.*.log
+firestore-debug.log
+ui-debug.log
+database-debug.log
+pubsub-debug.log
+
+# ── Local emulator state ──────────────────────────────
+# `firebase emulators:export` drops a timestamped dump wherever it is
+# run — that is database contents, never source.
+firebase-export-*/
+# The folder is tracked (via .gitkeep) because `--import` errors on a missing
+# directory; only the dumped data inside it is ignored.
+.firebase/
+emulator-data/*
+!emulator-data/.gitkeep
+
 # ── Editors / OS ──────────────────────────────────────
 .vscode/
 .idea/

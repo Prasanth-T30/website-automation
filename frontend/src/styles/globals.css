@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap");
 @import "./tokens.css";
 
 /* ── Base ─────────────────────────────────────────────────────────────────── */
@@ -118,4 +118,76 @@ svg {
    area — matches Dvein's actual site rather than a flat background. */
 @utility shell-wash {
   background: var(--shell-wash);
+}
+
+/* The login hero panel climbs out of the chrome's aubergine into full violet —
+   deliberately moodier than the brand gradient used for conversion moments. */
+@utility login-hero-gradient {
+  background: linear-gradient(155deg, #1b1229 0%, #3a2a5e 54%, #5b4ba8 100%);
+}
+
+@keyframes login-hero-glow {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@utility login-hero-glow {
+  animation: login-hero-glow 7s ease-in-out infinite;
+}
+
+/* ── Entrances ────────────────────────────────────────────────────────────
+   The console's motion vocabulary: views rise, popovers pop, meters sweep out
+   from their left edge. All three are neutralised by the reduced-motion block
+   above, so nothing here needs its own guard. */
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Route content on mount — one per view, never nested. */
+@utility rise-in {
+  animation: rise-in 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Menus, dropdowns, and the search results panel. */
+@utility pop-in {
+  animation: pop-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes sweep-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Progress meters — capacity bars, attendance rates, payment completion. */
+@utility sweep-x {
+  animation: sweep-x 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transform-origin: left;
 }

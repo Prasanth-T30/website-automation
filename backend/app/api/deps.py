@@ -11,6 +11,13 @@ from app.core.firebase import get_bucket, get_firestore
 from app.core.security import TokenError, decode_token
 from app.models.user import User, UserRole
 from app.repositories.activity import ActivityRepository
+from app.repositories.applications import ApplicationRepository
+from app.repositories.attendance import AttendanceRepository
+from app.repositories.batches import BatchRepository
+from app.repositories.payments import PaymentRepository
+from app.repositories.reports import ReportRepository
+from app.repositories.settings import SettingsRepository
+from app.repositories.students import StudentRepository
 from app.repositories.users import UserRepository
 from app.services.storage import StorageService
 
@@ -23,12 +30,47 @@ def get_activity_repo() -> ActivityRepository:
     return ActivityRepository(get_firestore())
 
 
+def get_application_repo() -> ApplicationRepository:
+    return ApplicationRepository(get_firestore())
+
+
+def get_student_repo() -> StudentRepository:
+    return StudentRepository(get_firestore())
+
+
+def get_batch_repo() -> BatchRepository:
+    return BatchRepository(get_firestore())
+
+
+def get_attendance_repo() -> AttendanceRepository:
+    return AttendanceRepository(get_firestore())
+
+
+def get_payment_repo() -> PaymentRepository:
+    return PaymentRepository(get_firestore())
+
+
+def get_report_repo() -> ReportRepository:
+    return ReportRepository(get_firestore())
+
+
+def get_settings_repo() -> SettingsRepository:
+    return SettingsRepository(get_firestore())
+
+
 def get_storage_service() -> StorageService:
     return StorageService(get_bucket())
 
 
 UserRepo = Annotated[UserRepository, Depends(get_user_repo)]
 ActivityRepo = Annotated[ActivityRepository, Depends(get_activity_repo)]
+ApplicationRepo = Annotated[ApplicationRepository, Depends(get_application_repo)]
+StudentRepo = Annotated[StudentRepository, Depends(get_student_repo)]
+BatchRepo = Annotated[BatchRepository, Depends(get_batch_repo)]
+AttendanceRepo = Annotated[AttendanceRepository, Depends(get_attendance_repo)]
+PaymentRepo = Annotated[PaymentRepository, Depends(get_payment_repo)]
+ReportRepo = Annotated[ReportRepository, Depends(get_report_repo)]
+SettingsRepo = Annotated[SettingsRepository, Depends(get_settings_repo)]
 Storage = Annotated[StorageService, Depends(get_storage_service)]
 
 _UNAUTHENTICATED = HTTPException(

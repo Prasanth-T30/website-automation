@@ -1,0 +1,91 @@
+"""A public registration — a Firestore document shape, not an ORM row.
+
+Field names match Dvein's live registration form exactly (see
+app/core/constants.py). `status`/`owner_id`/`claimed_at` are the ownership
+layer the reference site doesn't have: it's single-admin, with no concept of
+one of several staff members claiming a lead.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+
+
+@dataclass
+class Application:
+    id: str
+    registration_id: str
+
+    title: str | None
+    name: str
+    email: str
+    phone: str
+    college: str
+    place: str
+    department: str | None
+    year: str | None
+    applicant_type: str  # "student" | "professional"
+
+    category: str  # "Internship" | "Course" | "Project"
+    domain: str
+    duration: str
+    start_date: str  # ISO date — stored as a string, never a real date object
+    end_date: str
+
+    amount: float
+    transaction_id: str
+    payment_screenshot: str | None  # Firebase Storage path
+
+    declaration: bool
+
+    status: str = "pending"  # pending -> claimed -> approved | rejected
+    owner_id: str | None = None
+    claimed_at: datetime | None = None
+
+    approved_at: datetime | None = None
+    approval_email_subject: str | None = None
+    approval_email_body: str | None = None
+    email_sent: bool = False
+
+    rejection_reason: str | None = None
+    converted_student_id: str | None = None
+
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @staticmethod
+    def from_doc(doc_id: str, data: dict) -> Application:
+        return Application(
+            id=doc_id,
+            registration_id=data["registration_id"],
+            title=data.get("title"),
+            name=data["name"],
+            email=data["email"],
+            phone=data["phone"],
+            college=data["college"],
+            place=data["place"],
+            department=data.get("department"),
+            year=data.get("year"),
+            applicant_type=data.get("applicant_type", "student"),
+            category=data["category"],
+            domain=data["domain"],
+            duration=data["duration"],
+            start_date=data["start_date"],
+            end_date=data["end_date"],
+            amount=data["amount"],
+            transaction_id=data["transaction_id"],
+            payment_screenshot=data.get("payment_screenshot"),
+            declaration=data.get("declaration", False),
+            status=data.get("status", "pending"),
+            owner_id=data.get("owner_id"),
+            claimed_at=data.get("claimed_at"),
+            approved_at=data.get("approved_at"),
+            approval_email_subject=data.get("approval_email_subject"),
+            approval_email_body=data.get("approval_email_body"),
+            email_sent=data.get("email_sent", False),
+            rejection_reason=data.get("rejection_reason"),
+            converted_student_id=data.get("converted_student_id"),
+            created_at=data.get("created_at"),
+            updated_at=data.get("updated_at"),
+        )

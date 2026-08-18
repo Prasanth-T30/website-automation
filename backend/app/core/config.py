@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
+    # Timestamps are stored in UTC, but "this month's revenue" has to mean the
+    # month the institute is actually living in. Coimbatore is UTC+5:30, so a
+    # UTC month boundary pushes every payment taken between midnight and 05:30
+    # IST on the 1st into the previous month's figures.
+    reporting_timezone: str = "Asia/Kolkata"
+
     # ── Firebase ──────────────────────────────────────────────────────────
     # Production: point firebase_service_account_path at a real service-account
     # JSON and leave the emulator hosts unset.
@@ -75,6 +81,37 @@ class Settings(BaseSettings):
     seed_admin_password: str | None = None
     seed_hr_password: str | None = None
 
+    # ── SMTP (offer-letter / rejection emails) ──────────────────────────────
+    # Left unset in dev: email sending is skipped with a warning rather than
+    # failing the approve/reject action. Fill these in to actually send.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str = "info@dveininnovation.com"
+    smtp_from_name: str = "Dvein Innovations"
+    # How to secure the connection:
+    #   starttls — plain connect then upgrade. Port 587, the common default.
+    #   ssl      — TLS from the first byte. Port 465, which several providers
+    #              require and which STARTTLS cannot talk to.
+    #   none     — no encryption. Only for a local mail catcher in development;
+    #              never against a real provider, since the password is sent.
+    smtp_security: Literal["starttls", "ssl", "none"] = "starttls"
+
+    @property
+    def smtp_configured(self) -> bool:
+        """A host is the switch: set one and the app will try to send.
+
+        Username and password are deliberately not required — a local mail
+        catcher accepts mail with no credentials at all, and demanding them
+        would make the send path untestable without a real provider.
+        """
+        return bool(self.smtp_host)
+
+    @property
+    def smtp_authenticates(self) -> bool:
+        return bool(self.smtp_username and self.smtp_password)
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, v: object) -> object:
@@ -88,6 +125,15 @@ class Settings(BaseSettings):
     def _blank_path_to_none(cls, v: object) -> object:
         """`FOO=` in .env arrives as `""`, which Path() turns into `.` — a
         very different thing from "unset". Empty string must mean None."""
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+    @field_validator("smtp_host", "smtp_username", "smtp_password", mode="before")
+    @classmethod
+    def _blank_smtp_field_to_none(cls, v: object) -> object:
+        """`SMTP_HOST=` (unset in .env.example) must mean "not configured",
+        not the literal empty string — matters for `smtp_configured` below."""
         if isinstance(v, str) and not v.strip():
             return None
         return v

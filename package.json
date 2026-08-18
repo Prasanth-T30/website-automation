@@ -1,0 +1,16 @@
+{
+  "name": "dvein-hrm",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Dvein HRM — console, public registration form, and API",
+  "scripts": {
+    "emulators": "firebase emulators:start --only firestore,storage --import=./emulator-data --export-on-exit=./emulator-data",
+    "emulators:fresh": "firebase emulators:start --only firestore,storage",
+    "console": "pnpm --dir frontend dev",
+    "registration": "pnpm --dir registration dev",
+    "build": "pnpm --dir frontend build && pnpm --dir registration build"
+  },
+  "devDependencies": {
+    "firebase-tools": "^13.0.0"
+  }
+}

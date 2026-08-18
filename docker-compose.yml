@@ -21,6 +21,8 @@ services:
       # the host machine, outside this compose network.
       FIRESTORE_EMULATOR_HOST: ${FIRESTORE_EMULATOR_HOST:-host.docker.internal:8080}
       FIREBASE_STORAGE_EMULATOR_HOST: ${FIREBASE_STORAGE_EMULATOR_HOST:-host.docker.internal:9199}
+      # Monthly revenue is bucketed on this clock, not UTC.
+      REPORTING_TIMEZONE: ${REPORTING_TIMEZONE:-Asia/Kolkata}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -36,3 +38,18 @@ services:
       - api
     ports:
       - "5173:80"
+
+  # The public registration form. Deployed separately from the console — it is
+  # the only surface strangers reach, and it ships no console code at all.
+  registration:
+    build:
+      context: ./registration
+      args:
+        # Relative, so the browser stays same-origin and nginx proxies /api
+        # through to the API service on this network.
+        VITE_API_BASE_URL: ${REGISTRATION_API_BASE_URL:-/api/v1}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "5174:80"

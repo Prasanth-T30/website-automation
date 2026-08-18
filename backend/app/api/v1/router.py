@@ -5,15 +5,32 @@ Routers are registered here as each build phase lands.
 
 from fastapi import APIRouter
 
-from app.api.v1 import admin_users, auth
+from app.api.v1 import (
+    admin,
+    admin_users,
+    applications,
+    attendance,
+    auth,
+    batches,
+    notifications,
+    payments,
+    public,
+    reports,
+    settings,
+    students,
+)
 
 api_router = APIRouter(prefix="/api/v1")
 
 api_router.include_router(auth.router)
 api_router.include_router(admin_users.router)
-
-# Phase 2: public, applications
-# Phase 3: students, batches, attendance
-# Phase 4: payments, export
-# Phase 5: reports, notifications
-# Phase 6: stats, admin/hr-performance, settings
+api_router.include_router(public.router)
+api_router.include_router(applications.router)
+api_router.include_router(students.router)
+api_router.include_router(batches.router)
+api_router.include_router(attendance.router)
+api_router.include_router(payments.router)
+api_router.include_router(admin.router)
+api_router.include_router(reports.router)
+api_router.include_router(notifications.router)
+api_router.include_router(settings.router)

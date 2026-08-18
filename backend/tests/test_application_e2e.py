@@ -1,0 +1,255 @@
+"""Full-stack proof: submit -> claim -> approve/reject, over real HTTP against
+the real Firestore + Storage emulator — same discipline as test_auth_e2e.py.
+"""
+
+from __future__ import annotations
+
+import io
+import uuid
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.core.firebase import get_firestore
+from app.core.security import hash_password
+from app.models.user import UserRole
+from app.repositories.users import UserRepository
+from tests.conftest import requires_emulator
+
+pytestmark = requires_emulator
+
+
+@pytest.fixture
+def client():
+    from app.main import app
+
+    # Same rationale as test_auth_e2e.py: TestClient always reports the same
+    # loopback address, so the limiter must be reset between tests or later
+    # ones in the run trip the public form's 5/hour cap.
+    app.state.limiter.reset()
+    return TestClient(app)
+
+
+@pytest.fixture
+def user_repo():
+    return UserRepository(get_firestore())
+
+
+def _unique(prefix: str) -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
+def _login_as(client: TestClient, user_repo: UserRepository, *, role: UserRole) -> str:
+    email = f"{_unique('e2e-app')}@dvein.in"
+    user_repo.create(
+        email=email, full_name="E2E Applications", role=role,
+        password_hash=hash_password("a-real-password-1"), phone=None,
+        must_change_password=False,
+    )
+    res = client.post("/api/v1/auth/login", json={"email": email, "password": "a-real-password-1"})
+    assert res.status_code == 200
+    return client.cookies["dvein_csrf"]
+
+
+def _submit_application(client: TestClient, *, transaction_id: str, category: str = "Internship"):
+    form = {
+        "title": "Ms.",
+        "name": "Jane Applicant",
+        "email": f"{_unique('applicant')}@example.com",
+        "phone": "9876543210",
+        "college": "Test Engineering College",
+        "place": "Chennai",
+        "department": "",
+        "year": "3rd Year",
+        "applicant_type": "student",
+        "category": category,
+        "domain": "Full Stack Python",
+        "duration": "30 Days",
+        "start_date": "2026-09-01",
+        "end_date": "2026-10-01",
+        "amount": "6000",
+        "transaction_id": transaction_id,
+        "declaration": "true",
+    }
+    files = {"payment_screenshot": ("proof.png", io.BytesIO(b"\x89PNG\r\n fake"), "image/png")}
+    return client.post("/api/v1/public/applications", data=form, files=files)
+
+
+def test_public_submission_creates_a_pending_application(client: TestClient):
+    res = _submit_application(client, transaction_id=_unique("TXN"))
+    assert res.status_code == 201
+    body = res.json()
+    assert body["status"] == "pending"
+    assert body["registration_id"].startswith("REG")
+    assert body["owner_id"] is None
+
+
+def test_submission_rejects_unchecked_declaration(client: TestClient):
+    form = {
+        "name": "No Declaration", "email": "nodecl@example.com", "phone": "9876543210",
+        "college": "College", "place": "Chennai", "applicant_type": "student",
+        "category": "Internship", "domain": "Full Stack Python", "duration": "30 Days",
+        "start_date": "2026-09-01", "end_date": "2026-10-01", "amount": "6000",
+        "transaction_id": _unique("TXN"), "declaration": "false",
+    }
+    files = {"payment_screenshot": ("proof.png", io.BytesIO(b"fake"), "image/png")}
+    res = client.post("/api/v1/public/applications", data=form, files=files)
+    assert res.status_code == 422
+
+
+def test_submission_rejects_bad_file_type(client: TestClient):
+    form = {
+        "name": "Bad File", "email": "badfile@example.com", "phone": "9876543210",
+        "college": "College", "place": "Chennai", "applicant_type": "student",
+        "category": "Internship", "domain": "Full Stack Python", "duration": "30 Days",
+        "start_date": "2026-09-01", "end_date": "2026-10-01", "amount": "6000",
+        "transaction_id": _unique("TXN"), "declaration": "true",
+    }
+    files = {"payment_screenshot": ("proof.pdf", io.BytesIO(b"%PDF fake"), "application/pdf")}
+    res = client.post("/api/v1/public/applications", data=form, files=files)
+    assert res.status_code == 415
+
+
+def test_duplicate_transaction_id_is_rejected_over_http(client: TestClient):
+    txn = _unique("TXN")
+    first = _submit_application(client, transaction_id=txn)
+    assert first.status_code == 201
+    second = _submit_application(client, transaction_id=txn)
+    assert second.status_code == 409
+
+
+def test_choices_endpoint_returns_the_real_lists(client: TestClient):
+    res = client.get("/api/v1/public/choices")
+    assert res.status_code == 200
+    body = res.json()
+    assert "Full Stack Python" in body["domains"]
+    assert body["categories"] == ["Internship", "Course", "Project"]
+    assert "30 Days" in body["durations"]
+
+
+def test_full_claim_and_approve_flow_creates_a_student(client: TestClient, user_repo):
+    submitted = _submit_application(client, transaction_id=_unique("TXN"), category="Project")
+    app_id = submitted.json()["id"]
+
+    csrf = _login_as(client, user_repo, role=UserRole.hr)
+
+    claim_res = client.post(f"/api/v1/applications/{app_id}/claim", headers={"X-CSRF-Token": csrf})
+    assert claim_res.status_code == 200
+    assert claim_res.json()["status"] == "claimed"
+
+    approve_res = client.post(
+        f"/api/v1/applications/{app_id}/approve",
+        json={"subject": "", "body": ""},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert approve_res.status_code == 200
+    approved = approve_res.json()
+    assert approved["status"] == "approved"
+    assert approved["converted_student_id"]
+    # Project category: EMAIL_ENABLED_CATEGORIES excludes it, so no PDF/email
+    # attempt happens — nothing to assert about email here, only that the
+    # approval itself succeeded without one.
+
+
+def test_reject_flow_records_the_reason(client: TestClient, user_repo):
+    submitted = _submit_application(client, transaction_id=_unique("TXN"))
+    app_id = submitted.json()["id"]
+    csrf = _login_as(client, user_repo, role=UserRole.hr)
+
+    client.post(f"/api/v1/applications/{app_id}/claim", headers={"X-CSRF-Token": csrf})
+    res = client.post(
+        f"/api/v1/applications/{app_id}/reject",
+        json={"reason": "Payment could not be verified against the bank statement."},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert res.status_code == 200
+    assert res.json()["status"] == "rejected"
+
+
+def test_second_hr_cannot_claim_an_already_claimed_application(client: TestClient, user_repo):
+    submitted = _submit_application(client, transaction_id=_unique("TXN"))
+    app_id = submitted.json()["id"]
+
+    csrf1 = _login_as(client, user_repo, role=UserRole.hr)
+    claimed = client.post(f"/api/v1/applications/{app_id}/claim", headers={"X-CSRF-Token": csrf1})
+    assert claimed.status_code == 200
+
+    csrf2 = _login_as(client, user_repo, role=UserRole.hr)
+    second_attempt = client.post(
+        f"/api/v1/applications/{app_id}/claim", headers={"X-CSRF-Token": csrf2}
+    )
+    assert second_attempt.status_code == 409
+
+
+def test_non_owner_hr_cannot_approve_someone_elses_claim(client: TestClient, user_repo):
+    submitted = _submit_application(client, transaction_id=_unique("TXN"))
+    app_id = submitted.json()["id"]
+
+    csrf1 = _login_as(client, user_repo, role=UserRole.hr)
+    client.post(f"/api/v1/applications/{app_id}/claim", headers={"X-CSRF-Token": csrf1})
+
+    csrf2 = _login_as(client, user_repo, role=UserRole.hr)
+    res = client.post(
+        f"/api/v1/applications/{app_id}/approve",
+        json={"subject": "", "body": ""},
+        headers={"X-CSRF-Token": csrf2},
+    )
+    assert res.status_code == 403
+
+
+def test_admin_can_approve_any_claimed_application(client: TestClient, user_repo):
+    submitted = _submit_application(client, transaction_id=_unique("TXN"), category="Project")
+    app_id = submitted.json()["id"]
+
+    hr_csrf = _login_as(client, user_repo, role=UserRole.hr)
+    client.post(f"/api/v1/applications/{app_id}/claim", headers={"X-CSRF-Token": hr_csrf})
+
+    admin_csrf = _login_as(client, user_repo, role=UserRole.admin)
+    res = client.post(
+        f"/api/v1/applications/{app_id}/approve",
+        json={"subject": "", "body": ""},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert res.status_code == 200
+
+
+def test_offer_letter_downloads_a_real_pdf_after_approval(client: TestClient, user_repo):
+    submitted = _submit_application(client, transaction_id=_unique("TXN"), category="Internship")
+    app_id = submitted.json()["id"]
+    csrf = _login_as(client, user_repo, role=UserRole.hr)
+
+    client.post(f"/api/v1/applications/{app_id}/claim", headers={"X-CSRF-Token": csrf})
+    client.post(
+        f"/api/v1/applications/{app_id}/approve",
+        json={"subject": "", "body": ""},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    res = client.get(f"/api/v1/applications/{app_id}/offer-letter")
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "application/pdf"
+    assert res.content.startswith(b"%PDF")
+    assert len(res.content) > 1000
+
+
+def test_offer_letter_unavailable_before_approval(client: TestClient, user_repo):
+    submitted = _submit_application(client, transaction_id=_unique("TXN"))
+    app_id = submitted.json()["id"]
+    csrf = _login_as(client, user_repo, role=UserRole.hr)
+    client.post(f"/api/v1/applications/{app_id}/claim", headers={"X-CSRF-Token": csrf})
+
+    res = client.get(f"/api/v1/applications/{app_id}/offer-letter")
+    assert res.status_code == 400
+
+
+def test_list_applications_mine_filter(client: TestClient, user_repo):
+    submitted = _submit_application(client, transaction_id=_unique("TXN"))
+    app_id = submitted.json()["id"]
+
+    csrf = _login_as(client, user_repo, role=UserRole.hr)
+    client.post(f"/api/v1/applications/{app_id}/claim", headers={"X-CSRF-Token": csrf})
+
+    mine = client.get("/api/v1/applications", params={"mine": "true"})
+    assert mine.status_code == 200
+    ids = {a["id"] for a in mine.json()}
+    assert app_id in ids

@@ -22,6 +22,17 @@ os.environ.setdefault("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")
 os.environ.setdefault("STORAGE_EMULATOR_HOST", "http://127.0.0.1:9199")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-at-least-32-characters-long")
 
+# Give the whole run its own Firestore project, so the end-to-end tests — which
+# drive the real FastAPI app rather than a repository directly — write into a
+# throwaway namespace instead of the one local development uses.
+#
+# Without this the app reads FIREBASE_PROJECT_ID from .env (`demo-dvein-hrm`)
+# and every `pytest` leaves dozens of fabricated students, payments and users
+# sitting in the database you then open the console against. An environment
+# variable takes precedence over .env in pydantic-settings, and this must be
+# set before `app.core.config` is first imported.
+os.environ.setdefault("FIREBASE_PROJECT_ID", f"test-run-{uuid.uuid4().hex[:8]}")
+
 
 def _emulator_reachable(host: str) -> bool:
     ip, port = host.split(":")
@@ -45,8 +56,13 @@ requires_emulator = pytest.mark.skipif(
 def firestore_client():
     from google.cloud.firestore import Client
 
-    # A fresh project ID per test run keeps the emulator's in-memory data from
-    # one test leaking into another — each project is an isolated namespace.
+    # A fresh project ID per test keeps the emulator's data from one test
+    # leaking into another — each project is an isolated namespace.
+    #
+    # This depends on `emulators.singleProject` being false in firebase.json.
+    # With it true the emulator collapses every project into one, so this
+    # isolation silently does nothing: tests then read the dev data seeded
+    # under `demo-dvein-hrm` and write their own rows into it.
     return Client(project=f"test-{uuid.uuid4().hex[:8]}")
 
 

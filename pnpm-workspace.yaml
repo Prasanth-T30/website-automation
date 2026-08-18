@@ -1,5 +1,14 @@
 packages:
   - "frontend"
+  # The public registration form. Separate app, separate deploy target — it is
+  # the only surface strangers can reach, so it ships without any console code.
+  - "registration"
 allowBuilds:
   # esbuild ships prebuilt binaries and needs its install script to run.
   esbuild: true
+  # Both arrive via firebase-tools (dev-only, never shipped to a browser).
+  # protobufjs' install step generates the gRPC descriptors the emulator needs.
+  protobufjs: true
+  # re2 is a native regex engine with a pure-JS fallback; compiling it needs a
+  # full C++ toolchain, which is not worth requiring just to run emulators.
+  re2: false
