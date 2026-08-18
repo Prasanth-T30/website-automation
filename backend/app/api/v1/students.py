@@ -18,8 +18,10 @@ from app.api.deps import (
     ActiveUser,
     ActivityRepo,
     AdminUser,
+    ApplicationRepo,
     BatchRepo,
     CurrentUser,
+    PaymentRepo,
     ReportRepo,
     Storage,
     StudentRepo,
@@ -33,6 +35,7 @@ from app.schemas.student import (
     StudentCreate,
     StudentOut,
     StudentReassign,
+    StudentReassignResult,
     StudentUpdate,
 )
 from app.services import activity, email
@@ -74,10 +77,10 @@ def list_students(
     would leak a colleague's book. Admin sees everyone, and can pass
     `mine=true` to narrow to their own.
     """
-    if user.role is UserRole.admin:
-        owner_id = user.id if mine else None
-    else:
-        owner_id = user.id
+    # An HR is always pinned to their own book; only an admin may widen the
+    # view to everyone, and `mine=true` narrows them back to their own.
+    scope_to_self = user.role is not UserRole.admin or mine
+    owner_id = user.id if scope_to_self else None
 
     rows = students.list_all(owner_id=owner_id, batch_id=batch_id, no_batch=no_batch)
     return [StudentOut.model_validate(s) for s in rows]
@@ -153,21 +156,29 @@ def update_student(
     return StudentOut.model_validate(updated)
 
 
-@router.post("/{student_id}/reassign", response_model=StudentOut)
+@router.post("/{student_id}/reassign", response_model=StudentReassignResult)
 def reassign_student(
     student_id: str,
     data: StudentReassign,
     students: StudentRepo,
     users: UserRepo,
+    payments: PaymentRepo,
+    applications: ApplicationRepo,
     activity_repo: ActivityRepo,
     admin: AdminUser,
-) -> StudentOut:
-    """Move a student from one HR to another. Admin only.
+) -> StudentReassignResult:
+    """Move a student from one HR to another, revenue included. Admin only.
 
-    Historical payments keep the owner they were recorded against, so past
-    revenue stays with the HR who actually earned it; only future payments and
-    the student's own row follow the new owner. Reassigning would otherwise
-    silently rewrite months of per-HR revenue figures.
+    The student's whole payment history is re-credited to the new HR, so the
+    amount leaves the old HR's dashboard and lands on the new one's — a
+    student and the money they brought in are never split across two people's
+    figures.
+
+    `recorded_by_id` on each payment is left untouched, so the record of who
+    actually took the money survives the move even though the credit for it
+    changes hands. The amount moved is returned to the caller: this rewrites
+    figures that have already been reported on, so the admin is told what it
+    cost rather than discovering it on a dashboard later.
     """
     student = _get_or_404(students, student_id)
 
@@ -183,20 +194,38 @@ def reassign_student(
 
     previous = users.get(student.owner_id)
     updated = students.update(student_id, {"owner_id": new_owner.id})
+    moved_count, moved_total = payments.reassign_owner(
+        student_id=student_id, owner_id=new_owner.id
+    )
+    # The originating application moves too, so the old HR's "claimed" count
+    # stops including a student they no longer hold — otherwise their
+    # conversion rate reads as a claim that never converted.
+    if student.application_id:
+        applications.set_owner(student.application_id, new_owner.id)
 
+    from_name = previous.full_name if previous else "an unknown HR"
+    money = f" ({moved_count} payment(s), Rs {moved_total:,.0f})" if moved_count else ""
     activity.record(
         activity_repo,
         action="student.reassigned",
         actor_id=admin.id,
         entity_type="student",
         entity_id=student_id,
-        summary=(
-            f"Reassigned {student.name} from "
-            f"{previous.full_name if previous else 'an unknown HR'} to {new_owner.full_name}"
-        ),
-        meta={"from_owner_id": student.owner_id, "to_owner_id": new_owner.id},
+        summary=f"Reassigned {student.name} from {from_name} to {new_owner.full_name}{money}",
+        meta={
+            "from_owner_id": student.owner_id,
+            "to_owner_id": new_owner.id,
+            "payments_moved": moved_count,
+            "revenue_moved": moved_total,
+        },
     )
-    return StudentOut.model_validate(updated)
+    return StudentReassignResult(
+        student=StudentOut.model_validate(updated),
+        payments_moved=moved_count,
+        revenue_moved=moved_total,
+        from_owner_name=previous.full_name if previous else None,
+        to_owner_name=new_owner.full_name,
+    )
 
 
 @router.post("/{student_id}/certificate", response_model=CertificateIssueResult)

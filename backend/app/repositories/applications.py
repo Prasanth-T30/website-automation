@@ -173,3 +173,13 @@ class ApplicationRepository:
         updated = self.get(application_id)
         assert updated is not None
         return updated
+
+    def set_owner(self, application_id: str, owner_id: str) -> None:
+        """Re-point a claimed application at a different HR.
+
+        Used only when an admin reassigns the student it produced, so the two
+        records never disagree about who holds them. Unlike `claim`, this needs
+        no transaction: it is not racing anyone for an unclaimed row, it is an
+        admin overwriting an owner that already exists.
+        """
+        self._db.collection(APPLICATIONS).document(application_id).update({"owner_id": owner_id})

@@ -5,8 +5,6 @@ trip, and fail loudly — with a non-zero exit — when it cannot connect.
 
 from __future__ import annotations
 
-import pytest
-
 from app.cli import check
 from app.core.config import settings
 from tests.conftest import requires_emulator

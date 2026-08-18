@@ -346,7 +346,7 @@ def test_admin_can_move_a_student_between_hrs(client: TestClient, user_repo):
     sid = _manual_student(client, hr_a_csrf, "Gets Reassigned")
 
     # A second HR to hand them to.
-    hr_b_csrf = _login_as(client, user_repo, role=UserRole.hr)
+    _login_as(client, user_repo, role=UserRole.hr)
     hr_b_id = client.get("/api/v1/auth/me").json()["id"]
     assert sid not in {s["id"] for s in client.get("/api/v1/students").json()}
 
@@ -356,7 +356,7 @@ def test_admin_can_move_a_student_between_hrs(client: TestClient, user_repo):
         json={"owner_id": hr_b_id}, headers={"X-CSRF-Token": admin_csrf},
     )
     assert moved.status_code == 200, moved.text
-    assert moved.json()["owner_id"] == hr_b_id
+    assert moved.json()["student"]["owner_id"] == hr_b_id
 
     # It now shows up for B, and no longer for A.
     _login_as(client, user_repo, role=UserRole.hr)  # a fresh, unrelated HR

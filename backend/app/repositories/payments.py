@@ -89,3 +89,30 @@ class PaymentRepository:
         created = self.get(ref.id)
         assert created is not None
         return created
+
+    def reassign_owner(self, *, student_id: str, owner_id: str) -> tuple[int, float]:
+        """Re-attribute every payment for one student to a different HR.
+
+        Used when an admin moves a student between HRs: the revenue follows
+        them, so each HR's figures reflect the book they hold now.
+
+        Only `owner_id` — who the money is credited to — changes.
+        `recorded_by_id` is left alone, so the audit trail of who actually
+        took each payment survives the move.
+
+        Returns how many transactions moved and their total, so the caller can
+        tell the admin exactly how much revenue shifted.
+        """
+        rows = self.list_all(student_id=student_id)
+        moving = [p for p in rows if p.owner_id != owner_id]
+        if not moving:
+            return 0, 0.0
+
+        batch = self._db.batch()
+        for payment in moving:
+            batch.update(
+                self._db.collection(PAYMENT_TRANSACTIONS).document(payment.id),
+                {"owner_id": owner_id},
+            )
+        batch.commit()
+        return len(moving), sum(p.amount for p in moving)

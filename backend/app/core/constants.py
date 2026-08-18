@@ -34,7 +34,8 @@ class Domain:
 DOMAIN_CATALOG: tuple[Domain, ...] = (
     Domain(
         "Full Stack Java",
-        "Build enterprise-grade applications with Java, Spring Boot, REST APIs, and scalable backend systems.",
+        "Build enterprise-grade applications with Java, Spring Boot, REST APIs, and scalable "
+        "backend systems.",
         ("Java", "Spring Boot", "REST API", "MySQL"),
     ),
     Domain(
@@ -44,7 +45,8 @@ DOMAIN_CATALOG: tuple[Domain, ...] = (
     ),
     Domain(
         "Data Science and AI",
-        "Explore data pipelines, statistical modelling, and AI-driven applications using Python and real datasets.",
+        "Explore data pipelines, statistical modelling, and AI-driven applications using Python "
+        "and real datasets.",
         ("Python", "Pandas", "Statistics", "Visualization"),
     ),
     Domain(
@@ -59,27 +61,32 @@ DOMAIN_CATALOG: tuple[Domain, ...] = (
     ),
     Domain(
         "Business Analytics",
-        "Drive strategic decisions through data-driven business modelling, KPIs, and BI dashboards.",
+        "Drive strategic decisions through data-driven business modelling, KPIs, and BI "
+        "dashboards.",
         ("Strategy", "BI Tools", "KPIs", "Reporting"),
     ),
     Domain(
         "Software Testing",
-        "Manual and automated testing, test case design, and QA methodologies for production-grade software.",
+        "Manual and automated testing, test case design, and QA methodologies for production-grade "
+        "software.",
         ("Manual Testing", "Selenium", "Postman", "Test Plans"),
     ),
     Domain(
         "Cloud Computing",
-        "Deploy, scale, and manage applications on AWS, Azure, and GCP with cloud-native best practices.",
+        "Deploy, scale, and manage applications on AWS, Azure, and GCP with cloud-native best "
+        "practices.",
         ("AWS", "Azure", "GCP", "Terraform"),
     ),
     Domain(
         "MERN Stack",
-        "Full-stack web apps with MongoDB, Express, React, and Node.js in a cohesive modern workflow.",
+        "Full-stack web apps with MongoDB, Express, React, and Node.js in a cohesive modern "
+        "workflow.",
         ("MongoDB", "Express", "React", "Node.js"),
     ),
     Domain(
         "UI/UX Design and Prototyping",
-        "Design intuitive user interfaces and interactive prototypes using Figma and design system principles.",
+        "Design intuitive user interfaces and interactive prototypes using Figma and design system "
+        "principles.",
         ("Figma", "Prototyping", "Wireframes", "User Research"),
     ),
     Domain(
@@ -89,47 +96,56 @@ DOMAIN_CATALOG: tuple[Domain, ...] = (
     ),
     Domain(
         "IOT",
-        "Connect physical devices to the internet with sensor integration, protocols, and cloud IoT platforms.",
+        "Connect physical devices to the internet with sensor integration, protocols, and cloud "
+        "IoT platforms.",
         ("Arduino", "MQTT", "Sensors", "Cloud IoT"),
     ),
     Domain(
         "Embedded Systems",
-        "Program microcontrollers, real-time systems, and low-level hardware interfaces for embedded applications.",
+        "Program microcontrollers, real-time systems, and low-level hardware interfaces for "
+        "embedded applications.",
         ("C/C++", "Microcontrollers", "RTOS", "PCB"),
     ),
     Domain(
         "Cybersecurity",
-        "Ethical hacking, threat analysis, and secure system design following OWASP and industry standards.",
+        "Ethical hacking, threat analysis, and secure system design following OWASP and industry "
+        "standards.",
         ("Ethical Hacking", "OWASP", "Pen Testing", "SIEM"),
     ),
     Domain(
         "Big Data Analytics",
-        "Process and analyse massive datasets using Hadoop, Spark, and distributed computing frameworks.",
+        "Process and analyse massive datasets using Hadoop, Spark, and distributed computing "
+        "frameworks.",
         ("Hadoop", "Spark", "Hive", "Kafka"),
     ),
     Domain(
         "HR - Operations",
-        "Streamline HR workflows, talent acquisition, and workforce management with modern HR tools.",
+        "Streamline HR workflows, talent acquisition, and workforce management with modern HR "
+        "tools.",
         ("Talent Acquisition", "HRMS", "Onboarding", "Compliance"),
     ),
     Domain(
         "HR - Marketing",
-        "Employer branding, talent marketing strategies, and HR communication for modern organisations.",
+        "Employer branding, talent marketing strategies, and HR communication for modern "
+        "organisations.",
         ("Employer Branding", "Recruitment Mktg", "LinkedIn", "Analytics"),
     ),
     Domain(
         "HR - Finance & Accounting",
-        "Payroll management, financial reporting, and accounting fundamentals for HR professionals.",
+        "Payroll management, financial reporting, and accounting fundamentals for HR "
+        "professionals.",
         ("Payroll", "Tally", "Budgeting", "Compliance"),
     ),
     Domain(
         "Digital Marketing",
-        "SEO, paid advertising, social media strategy, and analytics for impactful digital campaigns.",
+        "SEO, paid advertising, social media strategy, and analytics for impactful digital "
+        "campaigns.",
         ("SEO", "Google Ads", "Social Media", "Analytics"),
     ),
     Domain(
         "DevOps",
-        "CI/CD pipelines, containerisation, and infrastructure automation for modern software delivery.",
+        "CI/CD pipelines, containerisation, and infrastructure automation for modern software "
+        "delivery.",
         ("Docker", "CI/CD", "Kubernetes", "Jenkins"),
     ),
 )

@@ -314,3 +314,101 @@ def test_month_boundary_uses_the_institute_timezone(client: TestClient, user_rep
     assert (boundary + timedelta(minutes=1)) >= boundary
     assert (boundary - timedelta(minutes=1)) < boundary
     assert boundary <= datetime.now(tz).astimezone(boundary.tzinfo)
+
+
+def _revenue_by_hr(client: TestClient, admin_csrf: str) -> dict[str, float]:
+    res = client.get("/api/v1/admin/hr-performance", headers={"X-CSRF-Token": admin_csrf})
+    assert res.status_code == 200, res.text
+    return {row["id"]: row["revenue_all_time"] for row in res.json()}
+
+
+def test_reassigning_a_student_moves_their_revenue_to_the_new_hr(
+    client: TestClient, user_repo
+):
+    """The money follows the student: debited from one HR, credited to the other.
+
+    Admin reassignment is meant to hand over a whole relationship, so leaving
+    the revenue behind would show the losing HR income for a student they no
+    longer hold and the gaining HR a student who appears to have paid nothing.
+    """
+    hr_a_csrf, hr_a_id = _login_as(client, user_repo, role=UserRole.hr)
+    student_id = _create_approved_student(client, hr_a_csrf, amount="3000")
+    _bump_total_fees(client, hr_a_csrf, student_id, 10000)
+    client.post(
+        "/api/v1/payments/record",
+        json={"student_id": student_id, "amount": 7000},
+        headers={"X-CSRF-Token": hr_a_csrf},
+    )
+
+    _, hr_b_id = _login_as(client, user_repo, role=UserRole.hr)
+
+    admin_csrf, _ = _login_as(client, user_repo, role=UserRole.admin)
+    before = _revenue_by_hr(client, admin_csrf)
+    assert before[hr_a_id] >= 10000
+    a_before, b_before = before[hr_a_id], before.get(hr_b_id, 0.0)
+
+    moved = client.post(
+        f"/api/v1/students/{student_id}/reassign",
+        json={"owner_id": hr_b_id},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert moved.status_code == 200, moved.text
+    body = moved.json()
+    assert body["payments_moved"] == 2  # the approval amount plus the installment
+    assert body["revenue_moved"] == 10000
+    assert body["to_owner_name"]
+
+    after = _revenue_by_hr(client, admin_csrf)
+    assert after[hr_a_id] == a_before - 10000, "revenue did not leave the old HR"
+    assert after[hr_b_id] == b_before + 10000, "revenue did not reach the new HR"
+
+
+def test_reassignment_moves_the_claim_so_conversion_rates_stay_honest(
+    client: TestClient, user_repo
+):
+    """The old HR must not keep a claim for a student they no longer hold."""
+    hr_a_csrf, hr_a_id = _login_as(client, user_repo, role=UserRole.hr)
+    student_id = _create_approved_student(client, hr_a_csrf, amount="3000")
+
+    _, hr_b_id = _login_as(client, user_repo, role=UserRole.hr)
+    admin_csrf, _ = _login_as(client, user_repo, role=UserRole.admin)
+
+    def rows() -> dict:
+        res = client.get("/api/v1/admin/hr-performance", headers={"X-CSRF-Token": admin_csrf})
+        return {row["id"]: row for row in res.json()}
+
+    a_claims_before = rows()[hr_a_id]["claimed_count"]
+
+    client.post(
+        f"/api/v1/students/{student_id}/reassign",
+        json={"owner_id": hr_b_id},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+
+    after = rows()
+    assert after[hr_a_id]["claimed_count"] == a_claims_before - 1
+    assert after[hr_a_id]["converted_count"] == 0
+    assert after[hr_b_id]["claimed_count"] == 1
+    assert after[hr_b_id]["converted_count"] == 1
+
+
+def test_the_record_of_who_took_each_payment_survives_reassignment(
+    client: TestClient, user_repo
+):
+    """Credit for the revenue moves; the audit trail of who collected it does not."""
+    hr_a_csrf, hr_a_id = _login_as(client, user_repo, role=UserRole.hr)
+    student_id = _create_approved_student(client, hr_a_csrf, amount="3000")
+
+    _, hr_b_id = _login_as(client, user_repo, role=UserRole.hr)
+    admin_csrf, _ = _login_as(client, user_repo, role=UserRole.admin)
+    client.post(
+        f"/api/v1/students/{student_id}/reassign",
+        json={"owner_id": hr_b_id},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+
+    ledger = client.get("/api/v1/payments", params={"student_id": student_id}).json()
+    assert ledger, "the student's payments vanished"
+    for payment in ledger:
+        assert payment["owner_id"] == hr_b_id
+        assert payment["recorded_by_id"] == hr_a_id

@@ -440,11 +440,18 @@ function StudentDetail({ student, batches, ownerName, canRecordPayment, staff, o
   });
   const reassign = useMutation({
     mutationFn: (owner_id) => studentsApi.reassign(student.id, owner_id),
-    onSuccess: async (updated) => {
+    onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: STUDENTS_KEY });
       await queryClient.invalidateQueries({ queryKey: ["admin", "hr-performance"] });
-      onUpdated(updated);
-      toast.success(`${updated.name} moved to their new HR.`);
+      await queryClient.invalidateQueries({ queryKey: ["payments"] });
+      onUpdated(result.student);
+      // The move rewrites revenue both HRs have already seen reported, so
+      // name the amount instead of a bare "moved".
+      toast.success(
+        result.payments_moved
+          ? `${result.student.name} and ${money(result.revenue_moved)} moved to ${result.to_owner_name}.`
+          : `${result.student.name} moved to ${result.to_owner_name}.`,
+      );
     },
     onError: (err) =>
       toast.error(err instanceof ApiError ? err.detail : "Could not reassign the student."),
@@ -538,14 +545,14 @@ function StudentDetail({ student, batches, ownerName, canRecordPayment, staff, o
         </CardBody>
       </Card>
 
-      {/* Admin only. Moving a student hands the whole record — and every future
-          payment — to another HR, so it is deliberately not something an HR can
-          do to their own book. */}
+      {/* Admin only. Moving a student hands the whole record — their payment
+          history included — to another HR, so it is deliberately not something
+          an HR can do to their own book. */}
       {staff && (
         <Card>
           <CardHeader
             title="Assigned HR"
-            description="Move this student to a different HR. Past payments stay credited to whoever earned them."
+            description="Move this student to a different HR. Their revenue moves with them, off the current HR's figures and onto the new one's."
           />
           <CardBody className="!p-4">
             <select

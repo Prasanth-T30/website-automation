@@ -130,3 +130,19 @@ class StudentOut(BaseModel):
     payment_status: str
     status: str
     created_at: datetime | None = None
+
+
+class StudentReassignResult(BaseModel):
+    """The moved student, plus what the move did to the two HRs' revenue.
+
+    Reassigning re-credits the student's whole payment history to the new HR,
+    so one admin click can shift a material sum between two people's reported
+    figures. The endpoint reports the amount back so the admin sees the
+    consequence rather than inferring it from a dashboard later.
+    """
+
+    student: StudentOut
+    payments_moved: int
+    revenue_moved: float
+    from_owner_name: str | None = None
+    to_owner_name: str

@@ -33,7 +33,8 @@ def test_duplicate_code_is_rejected(repo: BatchRepository):
     )
     with pytest.raises(DuplicateBatchCode):
         repo.create(
-            code="PY-01", domain="Full Stack Python", start_date="2026-09-01", end_date="2026-10-01",
+            code="PY-01", domain="Full Stack Python",
+            start_date="2026-09-01", end_date="2026-10-01",
             capacity=20, notes=None, created_by_id="admin-1",
         )
 
