@@ -147,12 +147,33 @@ def get_student(student_id: str, students: StudentRepo, _: CurrentUser) -> Stude
 
 @router.patch("/{student_id}", response_model=StudentOut)
 def update_student(
-    student_id: str, data: StudentUpdate, students: StudentRepo, user: CurrentUser
+    student_id: str,
+    data: StudentUpdate,
+    students: StudentRepo,
+    batches: BatchRepo,
+    user: CurrentUser,
 ) -> StudentOut:
     s = _get_or_404(students, student_id)
     _require_owner_or_admin(s, user)
 
     changes = data.model_dump(exclude_unset=True)
+
+    # Assigning into a batch: the batch has to exist, and has to have room.
+    # Nothing checked this before, which made `capacity` decorative — a card
+    # could read "30 / 20" and the overflow was invisible until someone
+    # counted. Occupancy is the true total across every HR, because a seat
+    # taken by a colleague's student is just as taken.
+    new_batch_id = changes.get("batch_id")
+    if new_batch_id and new_batch_id != s.batch_id:
+        batch = batches.get(new_batch_id)
+        if batch is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="That batch does not exist.")
+        occupied = len(students.list_all(batch_id=new_batch_id))
+        if batch.capacity and occupied >= batch.capacity:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=f"Batch {batch.code} is full ({occupied}/{batch.capacity}).",
+            )
     # The fee can never fall below what has already been collected. A negative
     # balance reads as "settled" on every screen while the payment-capping rule
     # quietly credits the student against their next installment.

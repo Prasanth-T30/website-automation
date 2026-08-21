@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Layers, Plus, Users } from "lucide-react";
+import { Banknote, Layers, Plus, UserMinus, UserPlus, Users } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -18,8 +18,10 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/ui/States";
 import { batchesApi } from "@/features/batches/api";
 import { publicApi } from "@/features/public/api";
 import { studentsApi } from "@/features/students/api";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { paymentsApi } from "@/features/payments/api";
 import { ApiError } from "@/lib/api";
-import { shortDate } from "@/lib/format";
+import { money, shortDate } from "@/lib/format";
 const BATCHES_KEY = ["batches"];
 const TONE = {
   active: "brand",
@@ -220,10 +222,67 @@ export default function Batches() {
   );
 }
 function BatchRoster({ batch }) {
+  const queryClient = useQueryClient();
+  const { isAdmin } = useAuth();
+  const [addOpen, setAddOpen] = useState(false);
+
+  // Both lists come back already scoped by the API — an HR sees their own
+  // students and their own payments, an admin sees everyone's. Every figure
+  // below is therefore "yours" for an HR and "the batch's" for an admin,
+  // the same rule the rest of the console follows.
   const roster = useQuery({
     queryKey: ["students", { batch_id: batch.id }],
     queryFn: () => studentsApi.list({ batch_id: batch.id }),
   });
+  const allStudents = useQuery({ queryKey: ["students"], queryFn: () => studentsApi.list() });
+  const payments = useQuery({ queryKey: ["payments"], queryFn: () => paymentsApi.list() });
+
+  const rows = roster.data ?? [];
+  const inBatch = new Set(rows.map((s) => s.id));
+  const balance = (s) => Math.max(0, s.total_fees - s.fees_paid);
+
+  const finance = {
+    settled: rows.filter((s) => balance(s) <= 0).length,
+    owing: rows.filter((s) => balance(s) > 0).length,
+    remaining: rows.reduce((sum, s) => sum + balance(s), 0),
+    // Money actually collected, read from the ledger rather than summing
+    // fees_paid — the ledger is what receipts were issued against.
+    generated: (payments.data ?? [])
+      .filter((p) => inBatch.has(p.student_id))
+      .reduce((sum, p) => sum + p.amount, 0),
+  };
+
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["students"] }),
+      queryClient.invalidateQueries({ queryKey: BATCHES_KEY }),
+    ]);
+  };
+
+  const assign = useMutation({
+    mutationFn: (studentId) => studentsApi.update(studentId, { batch_id: batch.id }),
+    onSuccess: async () => {
+      await refresh();
+      toast.success("Added to the batch.");
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.detail : "Could not add that student."),
+  });
+  const unassign = useMutation({
+    mutationFn: (studentId) => studentsApi.update(studentId, { batch_id: null }),
+    onSuccess: async () => {
+      await refresh();
+      toast.success("Removed from the batch.");
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.detail : "Could not remove that student."),
+  });
+
+  // Only students you can actually place: yours, and not already in a batch.
+  const assignable = (allStudents.data ?? []).filter((s) => !s.batch_id);
+  const full = batch.capacity > 0 && batch.student_count >= batch.capacity;
+  const othersHere = batch.student_count - rows.length;
+
   return (
     <div className="flex flex-col gap-5 p-5">
       <Card>
@@ -242,24 +301,92 @@ function BatchRoster({ batch }) {
         </CardBody>
       </Card>
 
+      {/* Batch finances. For an HR this is their own share — the batch is
+          shared, the revenue is not — so the heading says whose. */}
+      <Card>
+        <CardBody className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <Banknote className="size-4 text-fg-muted" />
+            <h3 className="text-xs font-bold tracking-wide text-fg-muted uppercase">
+              {isAdmin ? "Batch finances" : "Your students in this batch"}
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-md border border-line-subtle bg-subtle p-3">
+              <p className="text-[10px] font-bold tracking-wide text-fg-muted uppercase">
+                Collected
+              </p>
+              <p className="mt-0.5 text-lg font-extrabold tabular-nums text-success-text">
+                {money(finance.generated)}
+              </p>
+            </div>
+            <div className="rounded-md border border-line-subtle bg-subtle p-3">
+              <p className="text-[10px] font-bold tracking-wide text-fg-muted uppercase">
+                Remaining
+              </p>
+              <p
+                className={`mt-0.5 text-lg font-extrabold tabular-nums ${
+                  finance.remaining > 0 ? "text-warn-text" : "text-success-text"
+                }`}
+              >
+                {money(finance.remaining)}
+              </p>
+            </div>
+          </div>
+
+          <dl className="grid grid-cols-2 gap-2 text-sm">
+            <dt className="text-fg-muted">Fully paid</dt>
+            <dd className="text-right font-semibold tabular-nums text-fg">{finance.settled}</dd>
+            <dt className="text-fg-muted">Still owing</dt>
+            <dd className="text-right font-semibold tabular-nums text-fg">{finance.owing}</dd>
+          </dl>
+        </CardBody>
+      </Card>
+
       <div>
         <div className="mb-2 flex items-center gap-2">
           <Layers className="size-4 text-fg-muted" />
           <h3 className="text-xs font-bold tracking-wide text-fg-muted uppercase">
-            Roster {roster.data ? `(${roster.data.length})` : ""}
+            Roster {roster.data ? `(${rows.length})` : ""}
           </h3>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="ml-auto"
+            onClick={() => setAddOpen(true)}
+            disabled={full}
+            title={full ? "This batch is full." : undefined}
+          >
+            <UserPlus className="size-3.5" aria-hidden /> Add
+          </Button>
         </div>
+
+        {full && (
+          <p className="mb-2 text-xs text-warn-text">
+            Full at {batch.student_count} of {batch.capacity}. Remove someone to free a seat.
+          </p>
+        )}
+        {/* An HR's roster shows only their own students, so without this the
+            seat count above would look wrong to them. */}
+        {!isAdmin && othersHere > 0 && (
+          <p className="mb-2 text-xs text-fg-muted">
+            {othersHere} more {othersHere === 1 ? "seat is" : "seats are"} taken by other HRs.
+          </p>
+        )}
 
         {roster.isPending && <LoadingState label="Loading roster…" />}
 
         {roster.data && (
           <ul className="divide-y divide-line-subtle rounded-md border border-line-subtle">
-            {roster.data.map((s) => (
+            {rows.map((s) => (
               <li key={s.id} className="flex items-center gap-2.5 px-3 py-2.5">
                 <Avatar name={s.name} size="sm" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-fg">{s.name}</p>
-                  <p className="text-xs text-fg-muted">{s.email}</p>
+                  <p className="text-xs text-fg-muted">
+                    {balance(s) > 0 ? `${money(balance(s))} pending` : "Settled"}
+                  </p>
                 </div>
                 <Badge
                   tone={
@@ -272,14 +399,60 @@ function BatchRoster({ batch }) {
                 >
                   {s.payment_status}
                 </Badge>
+                <button
+                  type="button"
+                  onClick={() => unassign.mutate(s.id)}
+                  disabled={unassign.isPending}
+                  aria-label={`Remove ${s.name} from ${batch.code}`}
+                  className="rounded p-1 text-fg-muted transition-colors hover:bg-danger-subtle hover:text-danger"
+                >
+                  <UserMinus className="size-4" aria-hidden />
+                </button>
               </li>
             ))}
-            {roster.data.length === 0 && (
+            {rows.length === 0 && (
               <li className="px-3 py-6 text-center text-xs text-fg-muted">No students yet.</li>
             )}
           </ul>
         )}
       </div>
+
+      {addOpen && (
+        <Dialog
+          open
+          onOpenChange={(o) => !o && setAddOpen(false)}
+          title={`Add to ${batch.code}`}
+          description="Only your own students who are not already in a batch."
+        >
+          <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
+            {assignable.length === 0 && (
+              <p className="px-1 py-6 text-center text-sm text-fg-muted">
+                Everyone of yours is already in a batch.
+              </p>
+            )}
+            {assignable.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => {
+                  assign.mutate(s.id);
+                  setAddOpen(false);
+                }}
+                className="flex items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-subtle"
+              >
+                <Avatar name={s.name} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-fg">{s.name}</p>
+                  <p className="truncate text-xs text-fg-muted">
+                    {s.domain} · {balance(s) > 0 ? `${money(balance(s))} pending` : "settled"}
+                  </p>
+                </div>
+                <UserPlus className="size-4 text-fg-muted" aria-hidden />
+              </button>
+            ))}
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 }

@@ -385,3 +385,136 @@ def test_reassigning_to_an_unknown_person_is_refused(client: TestClient, user_re
         json={"owner_id": "does-not-exist"}, headers={"X-CSRF-Token": admin_csrf},
     )
     assert res.status_code == 404
+
+
+# ── Batch membership ─────────────────────────────────────────────────────
+
+
+def _make_batch(client: TestClient, csrf: str, *, capacity: int) -> dict:
+    res = client.post(
+        "/api/v1/batches",
+        json={
+            "code": _unique("CAP")[:12], "domain": "Full Stack Java",
+            "start_date": "2026-09-01", "end_date": "2026-10-01",
+            "capacity": capacity, "notes": None,
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert res.status_code == 201, res.text
+    return res.json()
+
+
+def test_a_student_can_be_added_to_and_removed_from_a_batch(client: TestClient, user_repo):
+    csrf = _login_as(client, user_repo, role=UserRole.hr)
+    batch = _make_batch(client, csrf, capacity=5)
+    sid = _manual_student(client, csrf, "Roster Member")
+
+    added = client.patch(
+        f"/api/v1/students/{sid}",
+        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf},
+    )
+    assert added.status_code == 200, added.text
+    assert added.json()["batch_id"] == batch["id"]
+    assert sid in {s["id"] for s in client.get(
+        "/api/v1/students", params={"batch_id": batch["id"]}).json()}
+
+    removed = client.patch(
+        f"/api/v1/students/{sid}",
+        json={"batch_id": None}, headers={"X-CSRF-Token": csrf},
+    )
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["batch_id"] is None
+    assert sid not in {s["id"] for s in client.get(
+        "/api/v1/students", params={"batch_id": batch["id"]}).json()}
+
+
+def test_a_full_batch_refuses_another_student(client: TestClient, user_repo):
+    """Capacity was decorative before — a card could read 30/20 and the
+    overflow was invisible until someone counted."""
+    csrf = _login_as(client, user_repo, role=UserRole.hr)
+    batch = _make_batch(client, csrf, capacity=1)
+
+    first = _manual_student(client, csrf, "Takes The Seat")
+    assert client.patch(
+        f"/api/v1/students/{first}",
+        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf},
+    ).status_code == 200
+
+    second = _manual_student(client, csrf, "No Room")
+    res = client.patch(
+        f"/api/v1/students/{second}",
+        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf},
+    )
+    assert res.status_code == 400, res.text
+    assert "full" in res.json()["detail"].lower()
+
+
+def test_a_seat_taken_by_another_hr_still_counts_against_capacity(
+    client: TestClient, user_repo
+):
+    """The batch is shared, so a colleague's student occupies a real seat."""
+    csrf_a = _login_as(client, user_repo, role=UserRole.hr)
+    batch = _make_batch(client, csrf_a, capacity=1)
+    a_student = _manual_student(client, csrf_a, "HR A Student")
+    client.patch(
+        f"/api/v1/students/{a_student}",
+        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf_a},
+    )
+
+    csrf_b = _login_as(client, user_repo, role=UserRole.hr)
+    b_student = _manual_student(client, csrf_b, "HR B Student")
+    res = client.patch(
+        f"/api/v1/students/{b_student}",
+        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf_b},
+    )
+    assert res.status_code == 400, "a colleague's seat was not counted"
+
+
+def test_freeing_a_seat_lets_the_next_student_in(client: TestClient, user_repo):
+    csrf = _login_as(client, user_repo, role=UserRole.hr)
+    batch = _make_batch(client, csrf, capacity=1)
+    first = _manual_student(client, csrf, "Leaves")
+    second = _manual_student(client, csrf, "Arrives")
+
+    client.patch(f"/api/v1/students/{first}",
+                 json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf})
+    client.patch(f"/api/v1/students/{first}",
+                 json={"batch_id": None}, headers={"X-CSRF-Token": csrf})
+
+    res = client.patch(f"/api/v1/students/{second}",
+                       json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf})
+    assert res.status_code == 200, res.text
+
+
+def test_assigning_to_a_batch_that_does_not_exist_is_refused(client: TestClient, user_repo):
+    csrf = _login_as(client, user_repo, role=UserRole.hr)
+    sid = _manual_student(client, csrf, "Nowhere To Go")
+    res = client.patch(
+        f"/api/v1/students/{sid}",
+        json={"batch_id": "no-such-batch"}, headers={"X-CSRF-Token": csrf},
+    )
+    assert res.status_code == 404
+
+
+def test_an_hr_sees_only_their_own_students_on_a_shared_batch_roster(
+    client: TestClient, user_repo
+):
+    csrf_a = _login_as(client, user_repo, role=UserRole.hr)
+    batch = _make_batch(client, csrf_a, capacity=10)
+    a_student = _manual_student(client, csrf_a, "Belongs To A")
+    client.patch(f"/api/v1/students/{a_student}",
+                 json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf_a})
+
+    csrf_b = _login_as(client, user_repo, role=UserRole.hr)
+    b_student = _manual_student(client, csrf_b, "Belongs To B")
+    client.patch(f"/api/v1/students/{b_student}",
+                 json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf_b})
+
+    seen = {s["id"] for s in client.get(
+        "/api/v1/students", params={"batch_id": batch["id"]}).json()}
+    assert b_student in seen
+    assert a_student not in seen, "a colleague's student appeared on the roster"
+
+    # The seat count stays honest for everyone, though — it is shared capacity.
+    card = next(b for b in client.get("/api/v1/batches").json() if b["id"] == batch["id"])
+    assert card["student_count"] == 2
