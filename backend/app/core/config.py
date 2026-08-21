@@ -111,6 +111,10 @@ class Settings(BaseSettings):
     smtp_password: str | None = None
     smtp_from_email: str = "info@dveininnovation.com"
     smtp_from_name: str = "Dvein Innovations"
+    # Where replies should land. Defaults to the sending mailbox, but the
+    # letterhead prints a different address, so this lets the two be aligned
+    # without changing which account does the sending.
+    smtp_reply_to: str | None = None
     # How to secure the connection:
     #   starttls — plain connect then upgrade. Port 587, the common default.
     #   ssl      — TLS from the first byte. Port 465, which several providers

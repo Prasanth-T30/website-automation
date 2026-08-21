@@ -16,6 +16,7 @@ from email.mime.application import MIMEApplication
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formatdate, make_msgid
 from html import unescape
 from pathlib import Path
 
@@ -261,6 +262,23 @@ def send_email(
     message["Subject"] = subject
     message["From"] = f"{settings.smtp_from_name} <{settings.smtp_from_email}>"
     message["To"] = to_email
+
+    # Date and Message-ID are not optional in practice. smtplib adds neither,
+    # and every spam filter treats their absence as a signal — no legitimate
+    # mailer omits them, so a message without them looks machine-generated in
+    # the worst sense. Message-ID also gives threading something to hold on
+    # to, so a reply attaches to the original rather than starting adrift.
+    message["Date"] = formatdate(localtime=True)
+    message["Message-ID"] = make_msgid(domain=settings.smtp_from_email.split("@")[-1])
+
+    # Replies should reach a person. Without this they go to the sending
+    # mailbox, which may be one nobody reads.
+    message["Reply-To"] = settings.smtp_reply_to or settings.smtp_from_email
+
+    # Marks this as transactional rather than bulk. Filters weigh an
+    # unsolicited-looking blast differently from a message a person asked for.
+    message["Auto-Submitted"] = "auto-generated"
+    message["X-Entity-Ref-ID"] = message["Message-ID"]
 
     related = MIMEMultipart("related")
 

@@ -163,3 +163,33 @@ def test_the_document_is_still_a_separate_attachment(monkeypatch):
     assert len(pdfs) == 1
     assert pdfs[0].get_content_disposition() == "attachment"
     assert pdfs[0].get_payload(decode=True).startswith(b"%PDF")
+
+
+def test_the_headers_spam_filters_look_for_are_all_present(monkeypatch):
+    """smtplib adds neither Date nor Message-ID, and their absence is a strong
+    spam signal — no legitimate mailer omits them."""
+    msg = _build(monkeypatch)
+    for header in ("From", "To", "Subject", "Date", "Message-ID", "MIME-Version"):
+        assert msg.get(header), f"{header} is missing"
+
+
+def test_the_message_id_is_well_formed(monkeypatch):
+    """A malformed one is worse than none — filters parse it, and threading
+    relies on it to attach a reply to the original."""
+    msg = _build(monkeypatch)
+    mid = msg.get("Message-ID")
+    assert mid.startswith("<") and mid.endswith(">")
+    assert "@" in mid
+
+
+def test_replies_reach_a_real_mailbox(monkeypatch):
+    msg = _build(monkeypatch)
+    assert "@" in msg.get("Reply-To", "")
+
+
+def test_the_date_is_parseable(monkeypatch):
+    """An unparseable Date is treated as no Date at all."""
+    from email.utils import parsedate_to_datetime
+
+    msg = _build(monkeypatch)
+    assert parsedate_to_datetime(msg.get("Date")) is not None
