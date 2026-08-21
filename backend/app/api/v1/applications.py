@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import io
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import ActivityRepo, ApplicationRepo, CurrentUser, PaymentRepo, StudentRepo
@@ -46,8 +46,22 @@ def list_applications(
     user: CurrentUser,
     status_filter: str | None = Query(None, alias="status"),
     mine: bool = Query(False, description="Only applications the caller has claimed"),
+    limit: int | None = Query(None, ge=1, le=500, description="Page size. Omit for the full list."),
+    cursor: str | None = Query(None, description="Resume token from a previous X-Next-Cursor"),
+    response: Response = None,  # noqa: B008 - FastAPI injects this
 ) -> list[ApplicationOut]:
     owner_id = user.id if mine else None
+    # Opt-in, for the same reason as /students: the console derives totals
+    # from this list, so quietly serving one page would make them wrong rather
+    # than merely slow.
+    if limit is not None:
+        page = applications.list_page(
+            status=status_filter, owner_id=owner_id, limit=limit, cursor=cursor
+        )
+        if response is not None and page.next_cursor:
+            response.headers["X-Next-Cursor"] = page.next_cursor
+        return [ApplicationOut.model_validate(a) for a in page.items]
+
     rows = applications.list_all(status=status_filter, owner_id=owner_id)
     return [ApplicationOut.model_validate(a) for a in rows]
 

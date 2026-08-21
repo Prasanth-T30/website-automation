@@ -125,3 +125,33 @@ def test_csrf_match_requires_both_values():
     assert not csrf_tokens_match(None, token)
     assert not csrf_tokens_match(token, None)
     assert not csrf_tokens_match("", "")
+
+
+def test_the_public_form_admits_a_lab_sized_burst_from_one_address():
+    """A college lab is thirty students behind a single IP.
+
+    The old 5/hour budget rejected the sixth of them with a 429 that is
+    indistinguishable, to an applicant, from the site being broken. Losing a
+    real registration is worse than accepting some junk — duplicates are
+    already impossible, since transaction ids are unique and every submission
+    carries a payment screenshot.
+    """
+    from app.core.config import Settings
+
+    limits = Settings().public_form_rate_limit
+    per_hour = next(
+        int(part.split("/")[0]) for part in limits.split(";") if part.endswith("/hour")
+    )
+    assert per_hour >= 100, f"{limits} is too tight for a shared network"
+
+
+def test_the_public_form_still_has_a_burst_ceiling():
+    """Generous is not unlimited — a script must still be stopped."""
+    from app.core.config import Settings
+
+    limits = Settings().public_form_rate_limit
+    assert "/minute" in limits, "no per-minute tier, so a script is unbounded"
+    per_minute = next(
+        int(part.split("/")[0]) for part in limits.split(";") if part.endswith("/minute")
+    )
+    assert per_minute <= 60

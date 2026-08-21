@@ -25,6 +25,12 @@ from datetime import UTC, date, datetime
 from google.cloud.firestore import Client, FieldFilter, Transaction, transactional
 
 from app.models.application import Application
+from app.repositories.pagination import (
+    Page,
+    apply_cursor,
+    clamp_page_size,
+    split_overfetch,
+)
 
 APPLICATIONS = "applications"
 APPLICATION_COUNTERS = "application_counters"
@@ -71,6 +77,33 @@ class ApplicationRepository:
             docs = [a for a in docs if a.owner_id == owner_id]
         epoch = datetime.min.replace(tzinfo=UTC)
         return sorted(docs, key=lambda a: a.created_at or epoch, reverse=True)
+
+    def list_page(
+        self,
+        *,
+        status: str | None = None,
+        owner_id: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[Application]:
+        """One page of the claim pool, without streaming every application.
+
+        `owner_id` is filtered in Python (Firestore would need a composite
+        index alongside `status`), so a page can arrive short. Follow
+        `next_cursor` to the end rather than stopping at the first short page.
+        """
+        size = clamp_page_size(limit)
+        query = self._db.collection(APPLICATIONS)
+        if status:
+            query = query.where(filter=FieldFilter("status", "==", status))
+
+        raw = list(apply_cursor(query, limit=size, cursor=cursor).stream())
+        raw, next_cursor = split_overfetch(raw, size)
+
+        docs = [Application.from_doc(d.id, d.to_dict()) for d in raw]
+        if owner_id:
+            docs = [a for a in docs if a.owner_id == owner_id]
+        return Page(items=docs, next_cursor=next_cursor)
 
     # ── Writes ───────────────────────────────────────────────────────────
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 import io
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import ActivityRepo, CurrentUser, PaymentRepo, StudentRepo, UserRepo
@@ -113,7 +113,22 @@ def list_payments(
     user: CurrentUser,
     student_id: str | None = Query(None),
     mine: bool = Query(False, description="Only payments attributed to the caller"),
+    limit: int | None = Query(None, ge=1, le=500, description="Page size. Omit for the full list."),
+    cursor: str | None = Query(None, description="Resume token from a previous X-Next-Cursor"),
+    response: Response = None,  # noqa: B008 - FastAPI injects this
 ) -> list[PaymentOut]:
+    # Opt-in, for the same reason as /students: the console derives totals
+    # from this list, so quietly serving one page would make them wrong rather
+    # than merely slow.
+    if limit is not None:
+        page = payments.list_page(
+            student_id=student_id, owner_id=_revenue_scope(user, mine),
+            limit=limit, cursor=cursor,
+        )
+        if response is not None and page.next_cursor:
+            response.headers["X-Next-Cursor"] = page.next_cursor
+        return [PaymentOut.model_validate(p) for p in page.items]
+
     rows = payments.list_all(student_id=student_id, owner_id=_revenue_scope(user, mine))
     return [PaymentOut.model_validate(p) for p in rows]
 

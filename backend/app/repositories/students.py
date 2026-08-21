@@ -8,6 +8,12 @@ from google.cloud.firestore import Client, FieldFilter
 
 from app.models.application import Application
 from app.models.student import Student
+from app.repositories.pagination import (
+    Page,
+    apply_cursor,
+    clamp_page_size,
+    split_overfetch,
+)
 
 STUDENTS = "students"
 
@@ -40,6 +46,41 @@ class StudentRepository:
             docs = [s for s in docs if s.batch_id is None]
         epoch = datetime.min.replace(tzinfo=UTC)
         return sorted(docs, key=lambda s: s.created_at or epoch, reverse=True)
+
+    def list_page(
+        self,
+        *,
+        owner_id: str | None = None,
+        batch_id: str | None = None,
+        no_batch: bool = False,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[Student]:
+        """One page of students, without reading the whole collection.
+
+        `list_all` streams every matching document, which is what the
+        dashboard's totals need and what a roster of a few hundred can afford.
+        This is for the paths that only ever display a screenful — there,
+        streaming everything is billed reads spent on rows nobody sees.
+
+        The batch filters still run in Python (Firestore would want a
+        composite index), so a page can arrive shorter than `limit`. Follow
+        `next_cursor` until it is None rather than stopping at a short page.
+        """
+        size = clamp_page_size(limit)
+        query = self._db.collection(STUDENTS)
+        if owner_id:
+            query = query.where(filter=FieldFilter("owner_id", "==", owner_id))
+
+        raw = list(apply_cursor(query, limit=size, cursor=cursor).stream())
+        raw, next_cursor = split_overfetch(raw, size)
+
+        docs = [Student.from_doc(d.id, d.to_dict()) for d in raw]
+        if batch_id:
+            docs = [s for s in docs if s.batch_id == batch_id]
+        if no_batch:
+            docs = [s for s in docs if s.batch_id is None]
+        return Page(items=docs, next_cursor=next_cursor)
 
     def create_from_application(
         self, application: Application, *, total_fees: float | None = None

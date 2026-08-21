@@ -26,6 +26,12 @@ from datetime import UTC, datetime
 from google.cloud.firestore import Client, FieldFilter, Transaction, transactional
 
 from app.models.payment import PaymentTransaction
+from app.repositories.pagination import (
+    Page,
+    apply_cursor,
+    clamp_page_size,
+    split_overfetch,
+)
 
 PAYMENT_TRANSACTIONS = "payment_transactions"
 PAYMENT_COUNTERS = "payment_counters"
@@ -50,6 +56,33 @@ class PaymentRepository:
             docs = [p for p in docs if p.owner_id == owner_id]
         epoch = datetime.min.replace(tzinfo=UTC)
         return sorted(docs, key=lambda p: p.created_at or epoch, reverse=True)
+
+    def list_page(
+        self,
+        *,
+        student_id: str | None = None,
+        owner_id: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[PaymentTransaction]:
+        """One page of the ledger, without streaming every transaction.
+
+        `owner_id` is filtered in Python (Firestore would need a composite
+        index alongside `student_id`), so a page can arrive short. Follow
+        `next_cursor` to the end rather than stopping at the first short page.
+        """
+        size = clamp_page_size(limit)
+        query = self._db.collection(PAYMENT_TRANSACTIONS)
+        if student_id:
+            query = query.where(filter=FieldFilter("student_id", "==", student_id))
+
+        raw = list(apply_cursor(query, limit=size, cursor=cursor).stream())
+        raw, next_cursor = split_overfetch(raw, size)
+
+        docs = [PaymentTransaction.from_doc(d.id, d.to_dict()) for d in raw]
+        if owner_id:
+            docs = [x for x in docs if x.owner_id == owner_id]
+        return Page(items=docs, next_cursor=next_cursor)
 
     def record(
         self,

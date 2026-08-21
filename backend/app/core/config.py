@@ -73,8 +73,24 @@ class Settings(BaseSettings):
     }
 
     # ── Rate limits ───────────────────────────────────────────────────────
-    public_form_rate_limit: str = "5/hour"
-    login_rate_limit: str = "10/minute"
+    # Two tiers, because the two threats are different shapes. The per-minute
+    # figure stops a script; the hourly one bounds sustained abuse.
+    #
+    # Both are per IP, and an IP is a whole network. A college lab running a
+    # registration drive is thirty students behind one address, each taking
+    # several minutes over a four-step form — the old 5/hour cut that off
+    # after the fifth person, and the sixth got a 429 with no way to tell it
+    # apart from the site being broken. Losing a real registration is a worse
+    # outcome than accepting some junk, especially when duplicates are already
+    # impossible: transaction_id uniqueness is enforced atomically, and every
+    # submission has to carry a payment screenshot.
+    public_form_rate_limit: str = "20/minute;200/hour"
+    login_rate_limit: str = "10/minute;100/hour"
+
+    # Empty means in-memory, which counts per process — fine for one
+    # container, meaningless across an autoscaling set. Point this at Redis
+    # (`redis://host:6379`) for any multi-instance deployment.
+    rate_limit_storage_uri: str = ""
 
     # ── Seed accounts ─────────────────────────────────────────────────────
     seed_admin_email: str = "admin@dvein.in"

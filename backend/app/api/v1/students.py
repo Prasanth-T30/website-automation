@@ -11,7 +11,7 @@ from __future__ import annotations
 import io
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import (
@@ -79,6 +79,9 @@ def list_students(
     mine: bool = Query(False, description="Admin only: narrow to the caller's own students"),
     batch_id: str | None = Query(None),
     no_batch: bool = Query(False, description="Only students not yet assigned to a batch"),
+    limit: int | None = Query(None, ge=1, le=500, description="Page size. Omit for the full list."),
+    cursor: str | None = Query(None, description="Resume token from a previous X-Next-Cursor"),
+    response: Response = None,  # noqa: B008 - FastAPI injects this
 ) -> list[StudentOut]:
     """An HR only ever sees the students they claimed.
 
@@ -91,6 +94,19 @@ def list_students(
     # view to everyone, and `mine=true` narrows them back to their own.
     scope_to_self = user.role is not UserRole.admin or mine
     owner_id = user.id if scope_to_self else None
+
+    # Pagination is opt-in. The console computes its dashboard and Finance
+    # totals from this list, so silently returning only the first page would
+    # not slow those figures down — it would make them wrong. A caller that
+    # wants a page asks for one; everyone else keeps the whole set.
+    if limit is not None:
+        page = students.list_page(
+            owner_id=owner_id, batch_id=batch_id, no_batch=no_batch,
+            limit=limit, cursor=cursor,
+        )
+        if response is not None and page.next_cursor:
+            response.headers["X-Next-Cursor"] = page.next_cursor
+        return [StudentOut.model_validate(s) for s in page.items]
 
     rows = students.list_all(owner_id=owner_id, batch_id=batch_id, no_batch=no_batch)
     return [StudentOut.model_validate(s) for s in rows]
