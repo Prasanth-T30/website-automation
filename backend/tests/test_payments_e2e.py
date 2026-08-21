@@ -412,3 +412,94 @@ def test_the_record_of_who_took_each_payment_survives_reassignment(
     for payment in ledger:
         assert payment["owner_id"] == hr_b_id
         assert payment["recorded_by_id"] == hr_a_id
+
+
+# ── Revenue isolation ────────────────────────────────────────────────────
+# Each HR's revenue is theirs alone; only admin sees across the institute.
+# These endpoints all took a client-supplied `mine` flag or no scope at all,
+# so an HR could read the whole institute's ledger by dropping a query
+# parameter. The console always sent the flag, which is exactly why the gap
+# stayed invisible — the enforcement has to live here, not in the caller.
+
+
+def _seed_two_hrs(client: TestClient, user_repo):
+    hr_a_csrf, hr_a_id = _login_as(client, user_repo, role=UserRole.hr)
+    a_student = _create_approved_student(client, hr_a_csrf, amount="3000")
+
+    hr_b_csrf, hr_b_id = _login_as(client, user_repo, role=UserRole.hr)
+    b_student = _create_approved_student(client, hr_b_csrf, amount="9000")
+    return (hr_a_csrf, hr_a_id, a_student), (hr_b_csrf, hr_b_id, b_student)
+
+
+def test_an_hr_listing_payments_without_the_mine_flag_still_sees_only_their_own(
+    client: TestClient, user_repo
+):
+    (_, hr_a_id, _), (hr_b_csrf, hr_b_id, _) = _seed_two_hrs(client, user_repo)
+
+    rows = client.get("/api/v1/payments").json()  # note: no mine=true
+    assert rows, "B should still see their own payments"
+    assert all(p["owner_id"] == hr_b_id for p in rows)
+    assert not any(p["owner_id"] == hr_a_id for p in rows)
+
+
+def test_an_hr_cannot_widen_the_ledger_by_asking_for_mine_false(
+    client: TestClient, user_repo
+):
+    (_, hr_a_id, _), (hr_b_csrf, hr_b_id, _) = _seed_two_hrs(client, user_repo)
+
+    rows = client.get("/api/v1/payments", params={"mine": "false"}).json()
+    assert all(p["owner_id"] == hr_b_id for p in rows)
+
+
+def test_an_admin_still_sees_every_hrs_revenue(client: TestClient, user_repo):
+    (_, hr_a_id, _), (_, hr_b_id, _) = _seed_two_hrs(client, user_repo)
+
+    admin_csrf, _ = _login_as(client, user_repo, role=UserRole.admin)
+    owners = {p["owner_id"] for p in client.get("/api/v1/payments").json()}
+    assert {hr_a_id, hr_b_id} <= owners, "the admin's institute-wide view broke"
+
+
+def test_the_excel_export_is_scoped_to_the_hr_who_asked(client: TestClient, user_repo):
+    """The export is a file that leaves the building — it must not carry
+    another HR's transactions out with it."""
+    _seed_two_hrs(client, user_repo)
+    mine = client.get("/api/v1/payments", params={"mine": "true"}).json()
+
+    res = client.get("/api/v1/payments/export.xlsx")
+    assert res.status_code == 200
+    rows = _xlsx_receipt_numbers(res.content)
+    assert rows == {p["receipt_number"] for p in mine}
+
+
+def test_the_pdf_export_is_scoped_to_the_hr_who_asked(client: TestClient, user_repo):
+    (_, _, _), (_, hr_b_id, _) = _seed_two_hrs(client, user_repo)
+    res = client.get("/api/v1/payments/export.pdf")
+    assert res.status_code == 200
+    assert res.content.startswith(b"%PDF")
+
+
+def test_an_hr_cannot_download_another_hrs_receipt(client: TestClient, user_repo):
+    (hr_a_csrf, _, _), _ = _seed_two_hrs(client, user_repo)
+
+    # Back to A to learn one of their receipt ids.
+    _login_as(client, user_repo, role=UserRole.hr)
+    admin_csrf, _ = _login_as(client, user_repo, role=UserRole.admin)
+    every = client.get("/api/v1/payments").json()
+    someone_elses = every[0]["id"]
+
+    _login_as(client, user_repo, role=UserRole.hr)  # a fresh, unrelated HR
+    res = client.get(f"/api/v1/payments/{someone_elses}/receipt")
+    assert res.status_code == 404, "an unrelated HR pulled someone else's receipt"
+
+
+def _xlsx_receipt_numbers(content: bytes) -> set[str]:
+    """Receipt numbers present in the exported workbook."""
+    from openpyxl import load_workbook
+
+    ws = load_workbook(io.BytesIO(content)).active
+    found = set()
+    for row in ws.iter_rows(values_only=True):
+        for cell in row:
+            if isinstance(cell, str) and cell.startswith("RCPT"):
+                found.add(cell)
+    return found

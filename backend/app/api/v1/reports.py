@@ -2,12 +2,16 @@
 
 Files themselves live in Firebase Storage; this router only manages the
 metadata and streams bytes back through the API (never a public Storage
-URL), same access-control rationale as `StorageService`'s docstring. Reads
-are open to any signed-in user — a certificate or call letter is useful
-context for anyone looking at a student, not just their owning HR. Upload is
-open too (any staff member may need to attach paperwork to a student who
-isn't "theirs" — e.g. admin generating certificates in bulk); only deleting
-is gated, to the uploader or admin.
+URL), same access-control rationale as `StorageService`'s docstring.
+
+Reads are scoped to the caller's own students. Receipts state what a student
+paid, so leaving documents readable institute-wide would hand every HR the
+revenue figures that are meant to be theirs alone — the same rule the
+payments router enforces. Admin sees everything.
+
+Upload stays open (any staff member may need to attach paperwork to a student
+who isn't "theirs" — e.g. admin generating certificates in bulk); deleting is
+gated to the uploader or admin.
 """
 
 from __future__ import annotations
@@ -19,7 +23,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import ActivityRepo, CurrentUser, ReportRepo, Storage
+from app.api.deps import ActivityRepo, CurrentUser, ReportRepo, Storage, StudentRepo
 from app.core.config import settings
 from app.models.report import Report
 from app.models.user import UserRole
@@ -36,15 +40,32 @@ def _get_or_404(reports: ReportRepo, report_id: str) -> Report:
     return r
 
 
+def _visible_to(report: Report, user, students: StudentRepo) -> bool:
+    """Whether this caller may see one document.
+
+    Ownership follows the student, not the uploader: an admin may generate a
+    certificate for someone else's student, and reassignment moves a student
+    between HRs. A document with no student attached falls back to whoever
+    uploaded it.
+    """
+    if user.role is UserRole.admin:
+        return True
+    if report.student_id:
+        student = students.get(report.student_id)
+        return student is not None and student.owner_id == user.id
+    return report.uploaded_by_id == user.id
+
+
 @router.get("", response_model=list[ReportOut])
 def list_reports(
     reports: ReportRepo,
-    _: CurrentUser,
+    students: StudentRepo,
+    user: CurrentUser,
     category: str | None = Query(None),
     student_id: str | None = Query(None),
 ) -> list[ReportOut]:
     rows = reports.list_all(category=category, student_id=student_id)
-    return [ReportOut.model_validate(r) for r in rows]
+    return [ReportOut.model_validate(r) for r in rows if _visible_to(r, user, students)]
 
 
 @router.post("", response_model=ReportOut, status_code=status.HTTP_201_CREATED)
@@ -107,9 +128,17 @@ async def upload_report(
 
 @router.get("/{report_id}/download")
 def download_report(
-    report_id: str, reports: ReportRepo, storage: Storage, _: CurrentUser
+    report_id: str,
+    reports: ReportRepo,
+    students: StudentRepo,
+    storage: Storage,
+    user: CurrentUser,
 ) -> StreamingResponse:
     report = _get_or_404(reports, report_id)
+    if not _visible_to(report, user, students):
+        # 404, not 403: confirming a document exists tells a caller something
+        # about a student who isn't theirs.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="File not found.")
     content = storage.download(report.stored_filename)
     if content is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="File no longer exists in storage.")

@@ -336,3 +336,92 @@ def test_each_hr_can_only_certify_their_own_claimed_students(client: TestClient,
     admin_csrf, _ = _login_as(client, user_repo, role=UserRole.admin)
     assert client.post(f"/api/v1/students/{sid}/certificate", json={},
                        headers={"X-CSRF-Token": admin_csrf}).status_code == 200
+
+
+# ── Document isolation ───────────────────────────────────────────────────
+# Reads used to be open to any signed-in user. A receipt states what a student
+# paid, so that handed every HR the revenue figures meant to be theirs alone.
+
+
+def _student_owned_by(client: TestClient, csrf: str, name: str) -> str:
+    res = client.post(
+        "/api/v1/students",
+        json={
+            "name": name, "email": f"{_unique('doc')}@example.com",
+            "phone": "9876543210", "college": "PSG College of Technology",
+            "place": "Coimbatore", "category": "Internship",
+            "domain": "DevOps", "duration": "30 Days",
+            "total_fees": 10000, "fees_paid": 0,
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert res.status_code == 201, res.text
+    return res.json()["id"]
+
+
+def _attach(client: TestClient, csrf: str, student_id: str, title: str) -> str:
+    res = client.post(
+        "/api/v1/reports",
+        data={"title": title, "category": "invoice", "student_id": student_id},
+        files={"file": ("r.pdf", io.BytesIO(b"%PDF-receipt"), "application/pdf")},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert res.status_code == 201, res.text
+    return res.json()["id"]
+
+
+def test_an_hr_does_not_see_documents_for_another_hrs_student(client: TestClient, user_repo):
+    hr_a_csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    a_student = _student_owned_by(client, hr_a_csrf, "Belongs To A")
+    a_doc = _attach(client, hr_a_csrf, a_student, "A's receipt")
+
+    _login_as(client, user_repo, role=UserRole.hr)
+    visible = {r["id"] for r in client.get("/api/v1/reports").json()}
+    assert a_doc not in visible, "another HR's receipt showed up in the documents list"
+
+
+def test_an_hr_cannot_download_another_hrs_document(client: TestClient, user_repo):
+    hr_a_csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    a_student = _student_owned_by(client, hr_a_csrf, "Belongs To A")
+    a_doc = _attach(client, hr_a_csrf, a_student, "A's receipt")
+
+    _login_as(client, user_repo, role=UserRole.hr)
+    res = client.get(f"/api/v1/reports/{a_doc}/download")
+    assert res.status_code == 404, "an unrelated HR downloaded someone else's document"
+
+
+def test_an_hr_still_sees_their_own_students_documents(client: TestClient, user_repo):
+    """The scoping must not lock an HR out of their own paperwork."""
+    hr_csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    student = _student_owned_by(client, hr_csrf, "Mine")
+    doc = _attach(client, hr_csrf, student, "My receipt")
+
+    assert doc in {r["id"] for r in client.get("/api/v1/reports").json()}
+    assert client.get(f"/api/v1/reports/{doc}/download").status_code == 200
+
+
+def test_an_admin_sees_every_hrs_documents(client: TestClient, user_repo):
+    hr_csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    student = _student_owned_by(client, hr_csrf, "Theirs")
+    doc = _attach(client, hr_csrf, student, "Their receipt")
+
+    _login_as(client, user_repo, role=UserRole.admin)
+    assert doc in {r["id"] for r in client.get("/api/v1/reports").json()}
+    assert client.get(f"/api/v1/reports/{doc}/download").status_code == 200
+
+
+def test_a_document_with_no_student_stays_with_whoever_uploaded_it(
+    client: TestClient, user_repo
+):
+    hr_csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    res = client.post(
+        "/api/v1/reports",
+        data={"title": "Loose paperwork", "category": "other"},
+        files={"file": ("x.pdf", io.BytesIO(b"%PDF-x"), "application/pdf")},
+        headers={"X-CSRF-Token": hr_csrf},
+    )
+    doc = res.json()["id"]
+    assert doc in {r["id"] for r in client.get("/api/v1/reports").json()}
+
+    _login_as(client, user_repo, role=UserRole.hr)
+    assert doc not in {r["id"] for r in client.get("/api/v1/reports").json()}

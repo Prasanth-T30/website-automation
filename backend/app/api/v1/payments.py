@@ -83,6 +83,19 @@ def _filtered_for_export(
     return rows, students_by_id, owner_names, " · ".join(parts)
 
 
+def _revenue_scope(user, mine: bool) -> str | None:
+    """Whose payments this caller may see.
+
+    An HR is pinned to their own revenue whatever the request asks for: the
+    `mine` flag is client-supplied, so trusting it let any HR read the whole
+    institute's ledger — and export it — just by dropping the parameter. Only
+    an admin may widen the view, and `mine=true` narrows them to their own.
+    """
+    if user.role is not UserRole.admin:
+        return user.id
+    return user.id if mine else None
+
+
 @router.get("", response_model=list[PaymentOut])
 def list_payments(
     payments: PaymentRepo,
@@ -90,8 +103,7 @@ def list_payments(
     student_id: str | None = Query(None),
     mine: bool = Query(False, description="Only payments attributed to the caller"),
 ) -> list[PaymentOut]:
-    owner_id = user.id if mine else None
-    rows = payments.list_all(student_id=student_id, owner_id=owner_id)
+    rows = payments.list_all(student_id=student_id, owner_id=_revenue_scope(user, mine))
     return [PaymentOut.model_validate(p) for p in rows]
 
 
@@ -108,7 +120,7 @@ def export_payments_xlsx(
 ) -> StreamingResponse:
     rows, by_id, owners, note = _filtered_for_export(
         payments, students, users,
-        owner_id=user.id if mine else None, method=method, college=college, q=q,
+        owner_id=_revenue_scope(user, mine), method=method, college=college, q=q,
     )
     content = build_payments_xlsx(rows, by_id, owners, filter_note=note)
     stamp = datetime.now(UTC).strftime("%Y%m%d")
@@ -132,7 +144,7 @@ def export_payments_pdf(
 ) -> StreamingResponse:
     rows, by_id, owners, note = _filtered_for_export(
         payments, students, users,
-        owner_id=user.id if mine else None, method=method, college=college, q=q,
+        owner_id=_revenue_scope(user, mine), method=method, college=college, q=q,
     )
     content = build_payments_pdf(rows, by_id, owners, filter_note=note)
     stamp = datetime.now(UTC).strftime("%Y%m%d")
@@ -188,10 +200,14 @@ def record_payment(
 
 @router.get("/{transaction_id}/receipt")
 def download_receipt(
-    transaction_id: str, payments: PaymentRepo, students: StudentRepo, _: CurrentUser
+    transaction_id: str, payments: PaymentRepo, students: StudentRepo, user: CurrentUser
 ) -> StreamingResponse:
     payment = payments.get(transaction_id)
     if payment is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Payment not found.")
+    # A receipt states what a student paid. Without this an HR could walk
+    # transaction ids and read the revenue of everyone else's book.
+    if user.role is not UserRole.admin and payment.owner_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Payment not found.")
     student = _get_student_or_404(students, payment.student_id)
 

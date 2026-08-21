@@ -14,12 +14,18 @@ router = APIRouter(prefix="/attendance", tags=["Attendance"])
 @router.get("", response_model=list[AttendanceOut])
 def list_attendance(
     attendance: AttendanceRepo,
-    _: CurrentUser,
+    students: StudentRepo,
+    user: CurrentUser,
     student_id: str | None = Query(None),
     batch_id: str | None = Query(None),
     date_filter: str | None = Query(None, alias="date"),
 ) -> list[AttendanceOut]:
     rows = attendance.list_all(student_id=student_id, batch_id=batch_id, date_filter=date_filter)
+    if user.role is not UserRole.admin:
+        # Batches are shared, but the roster inside one is not: an HR sees
+        # attendance for their own students only, matching the students list.
+        own = {s.id for s in students.list_all(owner_id=user.id)}
+        rows = [a for a in rows if a.student_id in own]
     return [AttendanceOut.model_validate(a) for a in rows]
 
 
