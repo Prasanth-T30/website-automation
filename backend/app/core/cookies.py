@@ -26,7 +26,7 @@ REFRESH_COOKIE_PATH = "/api/v1/auth"
 def _base_kwargs() -> dict[str, object]:
     kwargs: dict[str, object] = {
         "secure": settings.cookie_secure,
-        "samesite": "lax",
+        "samesite": settings.cookie_samesite,
     }
     if settings.cookie_domain:
         kwargs["domain"] = settings.cookie_domain

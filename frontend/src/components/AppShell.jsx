@@ -329,7 +329,7 @@ function NotificationsMenu() {
         onClick={() => setOpen((o) => !o)}
         title="Notifications"
         aria-label="Notifications"
-        className="relative flex size-9 items-center justify-center rounded-md border border-white/10 bg-white/5 text-chrome-text-hover transition-colors hover:bg-white/10"
+        className="relative flex size-9 items-center justify-center rounded-md border border-white/25 bg-white/10 text-chrome-text-hover transition-colors hover:border-white/40 hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
       >
         <Bell className="size-[17px]" aria-hidden />
         {urgentCount > 0 && (
@@ -464,7 +464,7 @@ export default function AppShell() {
               type="button"
               onClick={toggle}
               aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-              className="flex size-9 items-center justify-center rounded-md border border-white/10 bg-white/5 text-chrome-text-hover transition-colors hover:bg-white/10"
+              className="flex size-9 items-center justify-center rounded-md border border-white/25 bg-white/10 text-chrome-text-hover transition-colors hover:border-white/40 hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
             >
               {theme === "dark" ? (
                 <Sun className="size-[17px]" />
@@ -472,7 +472,7 @@ export default function AppShell() {
                 <Moon className="size-[17px]" />
               )}
             </button>
-            <div className="mx-1 h-6.5 w-px bg-chrome-border" />
+            <div className="mx-1 h-6.5 w-px bg-white/20" />
             <UserMenu />
           </div>
         </div>

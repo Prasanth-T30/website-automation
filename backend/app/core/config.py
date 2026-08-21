@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # Repo root is three levels up: app/core/config.py -> app -> backend -> root
@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_ttl_minutes: int = 15
     refresh_token_ttl_days: int = 7
+    # "lax" keeps the API and the site on one origin (a Hosting rewrite or a
+    # shared parent domain). "none" is required when they are genuinely
+    # cross-site — a browser will silently drop the cookie otherwise — and
+    # browsers only accept it alongside Secure, which the validator enforces.
+    cookie_samesite: Literal["lax", "none", "strict"] = "lax"
     cookie_secure: bool = False
     cookie_domain: str | None = None
 
@@ -153,6 +158,22 @@ class Settings(BaseSettings):
         if isinstance(v, str) and not v.strip():
             return None
         return v
+
+    @model_validator(mode="after")
+    def _samesite_none_requires_secure(self) -> Settings:
+        """A browser drops a SameSite=None cookie that is not Secure.
+
+        It does so silently: the login succeeds, the Set-Cookie arrives, and
+        every subsequent request is simply unauthenticated. Failing loudly at
+        startup is far cheaper than debugging that from the outside.
+        """
+        if self.cookie_samesite == "none" and not self.cookie_secure:
+            raise ValueError(
+                "COOKIE_SAMESITE=none requires COOKIE_SECURE=true — browsers "
+                "discard such cookies, leaving sessions that appear to work "
+                "and then silently fail."
+            )
+        return self
 
     @property
     def max_upload_bytes(self) -> int:

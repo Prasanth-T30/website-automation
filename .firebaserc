@@ -1,5 +1,18 @@
 {
   "projects": {
-    "default": "demo-dvein-hrm"
-  }
+    "default": "dvein-hrm"
+  },
+  "targets": {
+    "dvein-hrm": {
+      "hosting": {
+        "console": [
+          "dvein-hrm-console"
+        ],
+        "registration": [
+          "dvein-registration"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

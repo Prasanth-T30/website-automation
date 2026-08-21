@@ -5,7 +5,20 @@
  * mutations carry the double-submit CSRF token. Tokens are never read from or
  * written to JavaScript-accessible storage.
  */
-const BASE = "/api/v1";
+/**
+ * Where the API lives.
+ *
+ * Empty (the default) means same-origin: a dev proxy or a hosting rewrite
+ * puts the API under /api on this very host, which keeps session cookies
+ * same-site and is the simplest thing that works.
+ *
+ * Set VITE_API_URL when the API is deployed somewhere else entirely. The
+ * backend must then allow this origin in CORS_ORIGINS and set
+ * COOKIE_SAMESITE=none, or the browser will drop the session cookie without
+ * telling anyone.
+ */
+const API_ROOT = (import.meta.env.VITE_API_URL ?? "").replace(/\/+$/, "");
+const BASE = `${API_ROOT}/api/v1`;
 const CSRF_COOKIE = "dvein_csrf";
 const CSRF_HEADER = "X-CSRF-Token";
 export class ApiError extends Error {
@@ -23,6 +36,32 @@ export class ApiError extends Error {
     return this.status === 401 || this.status === 403;
   }
 }
+/**
+ * The CSRF token, held in memory.
+ *
+ * The server also sets it as a readable cookie, which is enough when the
+ * console and the API share an origin. They may not: a cross-origin console
+ * cannot read the API's cookies at all, so the token also comes back in the
+ * login response and is kept here. Memory rather than localStorage, so it
+ * dies with the tab and is never readable by an injected script later.
+ */
+let csrfToken = null;
+
+/** Called by the auth layer whenever a response carries a fresh token. */
+export function rememberCsrfToken(token) {
+  if (token) csrfToken = token;
+}
+
+export function forgetCsrfToken() {
+  csrfToken = null;
+}
+
+/** In-memory token first, cookie second — the cookie is unreadable when the
+ *  API is on another origin, and absent on a first load after a reload. */
+function currentCsrf() {
+  return csrfToken ?? readCookie(CSRF_COOKIE);
+}
+
 function readCookie(name) {
   const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
   return match?.[1] ? decodeURIComponent(match[1]) : null;
@@ -50,7 +89,7 @@ let refreshInFlight = null;
 async function refreshSession() {
   // No CSRF cookie means there was never a session to refresh. Skipping here
   // keeps anonymous page loads to a single request instead of two.
-  const csrf = readCookie(CSRF_COOKIE);
+  const csrf = currentCsrf();
   if (!csrf) return false;
   refreshInFlight ??= (async () => {
     try {
@@ -79,7 +118,7 @@ async function send(path, init) {
     headers.set("Content-Type", "application/json");
   }
   if (method !== "GET" && method !== "HEAD") {
-    const token = readCookie(CSRF_COOKIE);
+    const token = currentCsrf();
     if (token) headers.set(CSRF_HEADER, token);
   }
   return fetch(`${BASE}${path}`, { ...init, headers, credentials: "include" });

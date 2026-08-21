@@ -61,6 +61,11 @@ class UserOut(BaseModel):
 
 class SessionOut(BaseModel):
     user: UserOut
+    # Returned in the body as well as the cookie. When the console is served
+    # from a different origin to the API, JavaScript cannot read the cookie
+    # at all, so the double-submit token has to arrive somewhere reachable.
+    # Held in memory by the client, never in localStorage.
+    csrf_token: str | None = None
 
 
 # ── Admin user management ────────────────────────────────────────────────────

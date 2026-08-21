@@ -33,6 +33,15 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-at-least-32-characters-
 # set before `app.core.config` is first imported.
 os.environ.setdefault("FIREBASE_PROJECT_ID", f"test-run-{uuid.uuid4().hex[:8]}")
 
+# Never send real email from a test run. Not setdefault — an overwrite: the
+# developer's own .env carries working SMTP credentials, so without this every
+# `pytest` posts real messages through the institute's mailbox, burns its daily
+# quota, and mails whatever addresses the fixtures happen to invent.
+# `smtp_configured` keys off the host alone, so blanking it is the whole switch.
+os.environ["SMTP_HOST"] = ""
+os.environ["SMTP_USERNAME"] = ""
+os.environ["SMTP_PASSWORD"] = ""
+
 
 def _emulator_reachable(host: str) -> bool:
     ip, port = host.split(":")

@@ -152,7 +152,12 @@ def test_forced_password_change_then_normal_login(client: TestClient, repo: User
         json={"current_password": "temp-password-1", "new_password": "brand-new-password-1"},
         headers={"X-CSRF-Token": csrf},
     )
-    assert changed.status_code == 204
+    # 200 with a body, not 204: the endpoint rotates the CSRF token and hands
+    # the new one back, because a cross-origin console cannot read the cookie
+    # and would otherwise fail its very next write.
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["csrf_token"]
+    assert changed.json()["user"]["must_change_password"] is False
 
     # Old password must now be dead...
     stale = client.post(

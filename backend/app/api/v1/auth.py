@@ -36,7 +36,12 @@ _INVALID_CREDENTIALS = HTTPException(
 )
 
 
-def _issue_session(response: Response, user: User) -> None:
+def _issue_session(response: Response, user: User) -> str:
+    """Set the auth cookies and hand the CSRF token back to the caller.
+
+    Returned as well as set, because a console served from a different origin
+    to this API cannot read the cookie from JavaScript.
+    """
     csrf = generate_csrf_token()
     set_auth_cookies(
         response,
@@ -48,6 +53,7 @@ def _issue_session(response: Response, user: User) -> None:
         ),
         csrf_token=csrf,
     )
+    return csrf
 
 
 @router.post("/login", response_model=SessionOut)
@@ -81,8 +87,8 @@ def login(
 
     user = users.get(user.id)  # re-read to pick up last_login_at for the response
     assert user is not None
-    _issue_session(response, user)
-    return SessionOut(user=UserOut.model_validate(user))
+    csrf = _issue_session(response, user)
+    return SessionOut(user=UserOut.model_validate(user), csrf_token=csrf)
 
 
 @router.post("/refresh", response_model=SessionOut)
@@ -103,8 +109,8 @@ def refresh(request: Request, response: Response, users: UserRepo) -> SessionOut
 
     # Rotate both tokens on every refresh so a captured refresh token has a
     # short useful life.
-    _issue_session(response, user)
-    return SessionOut(user=UserOut.model_validate(user))
+    csrf = _issue_session(response, user)
+    return SessionOut(user=UserOut.model_validate(user), csrf_token=csrf)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -117,14 +123,14 @@ def me(user: CurrentUser) -> UserOut:
     return UserOut.model_validate(user)
 
 
-@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/change-password", response_model=SessionOut)
 def change_password(
     response: Response,
     data: ChangePasswordRequest,
     user: CurrentUser,
     users: UserRepo,
     activity_repo: ActivityRepo,
-) -> None:
+) -> SessionOut:
     if not verify_password(data.current_password, user.password_hash):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect.")
 
@@ -152,4 +158,8 @@ def change_password(
     assert updated is not None
     # The caller's own tokens were just invalidated too — re-issue so the user
     # who initiated the change is not logged out of the tab they are using.
-    _issue_session(response, updated)
+    # The new CSRF token comes back in the body as well: a cross-origin
+    # console cannot read the cookie, and the old token is now dead, so
+    # without this the very next action would fail its CSRF check.
+    csrf = _issue_session(response, updated)
+    return SessionOut(user=UserOut.model_validate(updated), csrf_token=csrf)
