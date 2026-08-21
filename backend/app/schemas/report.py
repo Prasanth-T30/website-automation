@@ -6,7 +6,16 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-REPORT_CATEGORY_CHOICES = ["certificate", "call_letter", "invoice", "other"]
+# `offer_letter` is its own category rather than being folded into
+# `call_letter`: it is the document the Documents page is built around, and a
+# filed letter has to be findable later without hunting through a mixed bag.
+REPORT_CATEGORY_CHOICES = [
+    "offer_letter",
+    "certificate",
+    "call_letter",
+    "invoice",
+    "other",
+]
 
 
 class ReportOut(BaseModel):

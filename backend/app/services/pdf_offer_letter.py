@@ -1,21 +1,43 @@
-"""Offer / completion letter PDF — matches Dvein's actual letterhead.
+"""Offer letter — Dvein's own letterhead, filled in.
 
-Built with fpdf2 (already a project dependency, no reportlab needed) rather
-than an HTML-to-PDF pipeline, mirroring how the receipt PDF (Phase 4) is
-built. Brand colours and company identity are hardcoded because they *are*
-the company's real, fixed identity — not configuration.
+`assets/offer_letter_bg.jpg` is the supplied letter with every line of body
+text stripped out; the logo, the header band, the footer address strip and
+the watermark are all part of the artwork and are never redrawn. This module
+composes the letter back on top of it.
+
+Everything variable — who it is addressed to, their college, the programme
+and its dates — comes from the student's own record, which in turn came from
+what they typed on the public registration form. Nothing is entered by hand
+at issue time, so a letter cannot disagree with the record it was issued
+against.
+
+Geometry is quoted in PDF points against the supplied page (1122 x 1583) and
+was measured from that file span by span, so each line lands where the design
+puts it rather than being eyeballed.
+
+The brand constants below are re-exported for `pdf_receipt`, which draws its
+own letterhead from scratch and shares this identity.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from fpdf import FPDF
 
-from app.models.application import Application
+from app.core.constants import (
+    COMPANY_ADDRESS_LINES,
+    COMPANY_EMAIL,
+    COMPANY_FULL_ADDRESS,
+    COMPANY_NAME,
+    COMPANY_PHONE,
+    SIGNATORY_NAME,
+    SIGNATORY_TITLE_SHORT,
+)
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+TEMPLATE_PATH = ASSETS_DIR / "offer_letter_bg.jpg"
 LOGO_PATH = ASSETS_DIR / "dvein_logo.png"
 SIGNATURE_PATH = ASSETS_DIR / "signature.png"
 
@@ -24,16 +46,28 @@ BRAND_TEAL = (21, 181, 184)  # #15B5B8
 BRAND_DARK = (20, 20, 20)
 BRAND_GREY = (74, 74, 74)
 
-COMPANY_NAME = "DVein Innovations Pvt. Ltd."
-COMPANY_ADDRESS_SHORT = "SSPDL Alpha City, Navalur, Chennai - 600130"
-# fpdf2's built-in (non-TTF) fonts only support latin-1, which excludes
-# typographic punctuation like en/em dashes — plain ASCII hyphens throughout.
-COMPANY_ADDRESS_FULL = "3rd Floor, Gamma Block, SSPDL - Alpha City, Navalur, Chennai - 600 130"
-COMPANY_EMAIL = "info@dveininnovation.com"
-COMPANY_PHONE = "+91 9500181230"
+# Kept as module-level names because `pdf_receipt` imports them from here.
+# The values themselves now live in core.constants, so the letterhead, the
+# receipt and the outgoing emails cannot drift apart.
+COMPANY_ADDRESS_SHORT = f"{COMPANY_ADDRESS_LINES[0]} {COMPANY_ADDRESS_LINES[1]}"
+COMPANY_ADDRESS_FULL = COMPANY_FULL_ADDRESS
 COMPANY_WEBSITE = "dveininnovation.com"
-SIGNATORY_NAME = "Sahana Ramamoorthi"
-SIGNATORY_TITLE = "Executive Head"
+SIGNATORY_TITLE = SIGNATORY_TITLE_SHORT
+
+PAGE_W, PAGE_H = 1122.0, 1583.04
+
+LEFT = 106.3
+INDENT = 142.2
+BODY_SIZE = 18.0
+LINE_H = 30.8  # measured between consecutive body lines in the original
+INK = (0, 0, 0)
+
+# The supplied file reports each span's top edge; fpdf draws from the
+# baseline, so every measured y carries this offset.
+BASELINE = 14.0
+
+# Right margin for wrapping. The original's longest line ends around x=1010.
+BODY_RIGHT = 1016.0
 
 _SUBJECT_BY_CATEGORY = {
     "Internship": "Internship Offer Letter",
@@ -41,135 +75,186 @@ _SUBJECT_BY_CATEGORY = {
     "Project": "Project Confirmation Letter",
 }
 
+# The template says "a one month internship Programme". Duration is a choice
+# on the form, so it has to read naturally for each one rather than always
+# claiming a month.
+_DURATION_PHRASE = {
+    "15 Days": "fifteen day",
+    "30 Days": "one month",
+    "45 Days": "forty-five day",
+    "60 Days": "two month",
+    "90 Days": "three month",
+}
 
-def _fmt_date(iso: str) -> str:
-    return datetime.fromisoformat(iso).strftime("%d/%m/%Y")
+_PROGRAMME_NOUN = {
+    "Internship": "internship",
+    "Course": "course",
+    "Project": "project",
+}
 
 
-def build_offer_letter_pdf(application: Application) -> bytes:
-    pdf = FPDF(orientation="P", unit="mm", format="A4")
-    # This is a fixed, single-page layout with an absolutely-positioned
-    # footer close to the bottom edge. Auto page-break triggers on any text
-    # call inside its margin zone regardless of absolute positioning, which
-    # was splitting the footer's two lines onto pages 2 and 3. The content
-    # above is short and bounded, so a real overflow can't happen here.
+def _latin1(text: str) -> str:
+    """fpdf2's core fonts are latin-1 only.
+
+    A college name with a typographic apostrophe would otherwise raise
+    mid-render and take the whole letter down.
+    """
+    for bad, good in {
+        "—": "-", "–": "-", "‘": "'", "’": "'", "“": '"', "”": '"', "·": "-",
+    }.items():
+        text = text.replace(bad, good)
+    return text.encode("latin-1", "replace").decode("latin-1")
+
+
+def _fmt_date(value: str | date | datetime | None) -> str:
+    """The template writes dates as 17/08/2026."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        try:
+            value = date.fromisoformat(value)
+        except ValueError:
+            return value
+    if isinstance(value, datetime):
+        value = value.date()
+    return value.strftime("%d/%m/%Y")
+
+
+def duration_phrase(duration: str | None, category: str | None) -> str:
+    """e.g. "one month internship" — how long, and what kind."""
+    noun = _PROGRAMME_NOUN.get(category or "", "programme")
+    phrase = _DURATION_PHRASE.get((duration or "").strip())
+    return f"{phrase} {noun}" if phrase else noun
+
+
+def offer_letter_filename(name: str) -> str:
+    safe = "".join(ch if ch.isalnum() else "_" for ch in name).strip("_")
+    return f"Offer_Letter_{safe or 'student'}.pdf"
+
+
+def _wrap(pdf: FPDF, text: str, first_x: float) -> list[tuple[float, str]]:
+    """Greedy wrap that indents only the first line, as the original does."""
+    pdf.set_font("Times", "", BODY_SIZE)
+    lines: list[tuple[float, str]] = []
+    x = first_x
+    current = ""
+    for word in text.split():
+        candidate = f"{current} {word}".strip()
+        if current and x + pdf.get_string_width(candidate) > BODY_RIGHT:
+            lines.append((x, current))
+            x = LEFT
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append((x, current))
+    return lines
+
+
+def build_offer_letter_pdf(
+    *,
+    name: str,
+    salutation: str | None = None,
+    college: str | None = None,
+    place: str | None = None,
+    category: str | None = None,
+    domain: str | None = None,
+    duration: str | None = None,
+    start_date: str | date | None = None,
+    end_date: str | date | None = None,
+    issued_on: date | None = None,
+) -> bytes:
+    """Render one offer letter.
+
+    Fields are passed explicitly rather than as a Student, because the caller
+    has to reach into the originating application for the salutation and the
+    programme dates — a student record carries neither.
+    """
+    # Explicit dimensions only. Passing an orientation alongside a format
+    # tuple makes fpdf2 swap width and height back.
+    pdf = FPDF(unit="pt", format=(PAGE_W, PAGE_H))
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
 
-    page_w = pdf.w
+    if TEMPLATE_PATH.exists():
+        pdf.image(str(TEMPLATE_PATH), x=0, y=0, w=PAGE_W, h=PAGE_H)
 
-    # ── Header: teal strip + blue banner ────────────────────────────────
-    pdf.set_fill_color(*BRAND_TEAL)
-    pdf.rect(0, 0, page_w, 6, style="F")
-    pdf.set_fill_color(*BRAND_BLUE)
-    pdf.rect(0, 6, page_w, 22, style="F")
+    pdf.set_text_color(*INK)
 
-    if LOGO_PATH.exists():
-        pdf.image(str(LOGO_PATH), x=14, y=10, h=16)
+    def line(y: float, text: str, x: float = LEFT, style: str = "") -> None:
+        pdf.set_font("Times", style, BODY_SIZE)
+        pdf.text(x, y + BASELINE, _latin1(text))
 
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_xy(page_w - 90, 11)
-    pdf.cell(76, 5, COMPANY_PHONE, align="R")
-    pdf.set_xy(page_w - 90, 17)
-    pdf.set_font("Helvetica", "BI", 10)
-    pdf.cell(76, 5, COMPANY_EMAIL, align="R")
+    # ── Sender block ─────────────────────────────────────────────────────
+    line(219.2, COMPANY_NAME)
+    line(256.0, COMPANY_ADDRESS_LINES[0])
+    line(292.9, f"{COMPANY_ADDRESS_LINES[1]} Email: {COMPANY_EMAIL}")
+    line(329.1, f"Phone: {COMPANY_PHONE}")
 
-    # ── Company block ─────────────────────────────────────────────────────
-    pdf.set_y(38)
-    pdf.set_text_color(*BRAND_DARK)
-    pdf.set_font("Helvetica", "", 11)
-    local_phone = COMPANY_PHONE.replace("+91 ", "")
-    company_block = (
-        f"{COMPANY_NAME}\n{COMPANY_ADDRESS_SHORT}\nEmail: {COMPANY_EMAIL}\nPhone: {local_phone}"
-    )
-    pdf.multi_cell(0, 6, company_block)
+    # ── Date and addressee ───────────────────────────────────────────────
+    line(376.0, f"Date: {_fmt_date(issued_on or date.today())}", x=108.1)
 
-    pdf.ln(2)
-    pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 6, f"Date: {datetime.now(UTC).strftime('%d/%m/%Y')}", new_x="LMARGIN", new_y="NEXT")
+    addressed = f"{salutation} {name}".strip() if salutation else name
+    line(488.7, "To,")
+    line(512.7, f"{addressed},")
+    if college:
+        line(547.2, f"{college},")
+    if place:
+        line(599.3, f"{place}.")
 
-    # ── Recipient ────────────────────────────────────────────────────────
-    pdf.ln(6)
-    recipient = f"{application.title} {application.name}" if application.title else application.name
-    pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 6, "To,", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"{recipient},", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"{application.college},", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"{application.place}.", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Times", "B", BODY_SIZE)
+    pdf.text(LEFT, 651.2 + BASELINE, _latin1("Subject:"))
+    subject_x = LEFT + pdf.get_string_width("Subject: ")
+    line(651.2, _SUBJECT_BY_CATEGORY.get(category or "", "Offer Letter"), x=subject_x)
 
-    pdf.ln(6)
-    subject = _SUBJECT_BY_CATEGORY.get(application.category, "Offer Letter")
-    pdf.set_font("Helvetica", "B", 11)
-    pdf.cell(20, 6, "Subject:")
-    pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 6, f" {subject}", new_x="LMARGIN", new_y="NEXT")
+    line(723.0, f"Dear {addressed},", style="B")
 
     # ── Body ─────────────────────────────────────────────────────────────
-    pdf.ln(6)
-    pdf.set_font("Helvetica", "B", 11)
-    pdf.cell(0, 6, f"Dear {recipient},", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(4)
+    programme = duration_phrase(duration, category)
+    noun = _PROGRAMME_NOUN.get(category or "", "programme")
+    window = ""
+    if start_date and end_date:
+        window = f", commencing from ({_fmt_date(start_date)} to {_fmt_date(end_date)})"
+    elif start_date:
+        window = f", commencing from {_fmt_date(start_date)}"
 
-    noun = "internship" if application.category == "Internship" else (
-        "course" if application.category == "Course" else "project"
-    )
-    body = (
-        f"We are pleased to offer you the opportunity to undergo a {application.duration} "
-        f"{noun} programme on {application.domain} at {COMPANY_NAME}, commencing from "
-        f"({_fmt_date(application.start_date)} to {_fmt_date(application.end_date)})."
-    )
-    pdf.set_font("Helvetica", "", 11)
-    pdf.multi_cell(0, 6.5, body, align="J")
-    pdf.ln(3)
-    pdf.multi_cell(
-        0, 6.5,
-        "During this period, you will be engaged in practical learning and project-based "
-        "training under the guidance of our team. This programme is aimed at providing you "
-        "with real-time exposure to industry practices and enhancing your technical and "
-        "analytical skills in your area of interest.",
-        align="J",
-    )
-    pdf.ln(3)
-    pdf.multi_cell(
-        0, 6.5,
-        "We look forward to your valuable participation and hope this experience will "
-        "contribute meaningfully to your professional development.",
-        align="J",
-    )
-    pdf.ln(3)
-    pdf.multi_cell(
-        0, 6.5,
-        "Kindly acknowledge this offer by replying to this letter or contacting us directly.",
-        align="J",
-    )
-    pdf.ln(6)
-    pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 6, "Wishing you all the best.", align="C", new_x="LMARGIN", new_y="NEXT")
+    paragraphs = [
+        (
+            771.2,
+            f"We are pleased to offer you the opportunity to undergo a {programme} "
+            f"Programme on {domain or 'your chosen domain'} at {COMPANY_NAME}"
+            f"{window}.",
+        ),
+        (
+            847.6,
+            f"During this period, you will be engaged in practical learning and "
+            f"project-based training under the guidance of our team. This {noun} is "
+            f"aimed at providing you with real-time exposure to industry practices and "
+            f"enhancing your technical and analytical skills in your area of interest.",
+        ),
+        (
+            954.4,
+            "We look forward to your valuable participation and hope this experience "
+            "will contribute meaningfully to your professional development.",
+        ),
+        (
+            1030.0,
+            "Kindly acknowledge this offer by replying to this letter or contacting us "
+            "directly.",
+        ),
+    ]
+    for top, text in paragraphs:
+        for i, (x, chunk) in enumerate(_wrap(pdf, text, INDENT)):
+            pdf.set_font("Times", "", BODY_SIZE)
+            pdf.text(x, top + BASELINE + i * LINE_H, _latin1(chunk))
 
-    # ── Signature block ──────────────────────────────────────────────────
-    pdf.ln(14)
-    if SIGNATURE_PATH.exists():
-        pdf.image(str(SIGNATURE_PATH), x=14, y=pdf.get_y(), h=14)
-        pdf.ln(16)
-    pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 6, "Warm regards,", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "B", 11)
-    pdf.cell(0, 6, f"{SIGNATORY_NAME},", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 6, f"{SIGNATORY_TITLE},", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, COMPANY_NAME + ".", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 6, f"{COMPANY_EMAIL} | {local_phone}", new_x="LMARGIN", new_y="NEXT")
+    line(1075.2, f"Wishing you all the best for your {noun}.", x=419.2)
 
-    # ── Footer ───────────────────────────────────────────────────────────
-    footer_y = pdf.h - 18
-    pdf.set_fill_color(*BRAND_BLUE)
-    pdf.rect(0, footer_y, page_w, 18, style="F")
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_xy(0, footer_y + 3)
-    pdf.cell(page_w, 6, COMPANY_ADDRESS_FULL, align="C")
-    pdf.set_xy(0, footer_y + 9)
-    pdf.cell(page_w, 6, COMPANY_WEBSITE, align="C")
+    # ── Signature ────────────────────────────────────────────────────────
+    line(1260.9, "Warm regards,", x=110.0)
+    line(1292.1, f"{SIGNATORY_NAME},", style="B")
+    line(1323.0, f"{SIGNATORY_TITLE_SHORT},")
+    line(1353.7, COMPANY_NAME)
+    line(1384.6, f"{COMPANY_EMAIL}|{COMPANY_PHONE}")
 
     return bytes(pdf.output())

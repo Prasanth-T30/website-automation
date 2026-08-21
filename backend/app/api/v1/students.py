@@ -32,6 +32,9 @@ from app.models.user import UserRole
 from app.schemas.student import (
     CertificateIssueRequest,
     CertificateIssueResult,
+    OfferCandidate,
+    OfferLetterRequest,
+    OfferLetterResult,
     StudentCreate,
     StudentOut,
     StudentReassign,
@@ -43,6 +46,13 @@ from app.services.pdf_certificate import (
     build_certificate_pdf,
     certificate_filename,
     certificate_number,
+)
+from app.services.pdf_offer_letter import (
+    build_offer_letter_pdf,
+    offer_letter_filename,
+)
+from app.services.pdf_offer_letter import (
+    duration_phrase as offer_duration_phrase,
 )
 
 router = APIRouter(prefix="/students", tags=["Students"])
@@ -406,4 +416,184 @@ def preview_certificate(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{certificate_filename(student)}"'},
+    )
+
+
+@router.get("/offer-letter/candidates", response_model=list[OfferCandidate])
+def offer_letter_candidates(
+    students: StudentRepo,
+    payments: PaymentRepo,
+    reports: ReportRepo,
+    user: CurrentUser,
+) -> list[OfferCandidate]:
+    """Students who may be sent an offer letter: anyone who has paid.
+
+    Eligibility is "has paid something", not "settled in full" — the letter
+    goes out on the deposit, which is what secures the seat. Scoped like every
+    other list: an HR sees their own, an admin sees everyone's.
+
+    `fees_paid` alone is not proof of payment, because it can be set by hand
+    when a student is entered manually. A real receipt in the ledger is, so
+    that is what this checks.
+    """
+    scope = None if user.role is UserRole.admin else user.id
+    paid_for = {p.student_id for p in payments.list_all(owner_id=scope) if p.amount > 0}
+    issued_for = {
+        r.student_id for r in reports.list_all(category="offer_letter") if r.student_id
+    }
+
+    rows = [
+        OfferCandidate(
+            id=s.id,
+            name=s.name,
+            email=s.email,
+            college=s.college,
+            category=s.category,
+            domain=s.domain,
+            duration=s.duration,
+            total_fees=s.total_fees,
+            fees_paid=s.fees_paid,
+            balance=max(0.0, s.total_fees - s.fees_paid),
+            already_issued=s.id in issued_for,
+        )
+        for s in students.list_all(owner_id=scope)
+        if s.id in paid_for
+    ]
+    return sorted(rows, key=lambda r: (r.already_issued, r.name.lower()))
+
+
+def _offer_letter_fields(student: Student, applications: ApplicationRepo) -> dict:
+    """Assemble what the letter needs from the student and their application.
+
+    Salutation and the programme dates live on the application, not the
+    student, so a manually-entered student legitimately has neither. The
+    renderer omits whatever is missing rather than inventing it.
+    """
+    source = applications.get(student.application_id) if student.application_id else None
+    return {
+        "name": student.name,
+        "salutation": source.title if source else None,
+        "college": student.college,
+        "place": student.place,
+        "category": student.category,
+        "domain": student.domain,
+        "duration": student.duration,
+        "start_date": source.start_date if source else None,
+        "end_date": source.end_date if source else None,
+    }
+
+
+@router.get("/{student_id}/offer-letter")
+def preview_offer_letter(
+    student_id: str,
+    students: StudentRepo,
+    applications: ApplicationRepo,
+    user: CurrentUser,
+) -> StreamingResponse:
+    """Render the letter without issuing it — no email, nothing filed.
+
+    Served `inline` so the console can show it before an HR commits to
+    sending. This is byte-for-byte what `POST` will email, since both build
+    from the same record.
+    """
+    student = _get_or_404(students, student_id)
+    _require_owner_or_admin(student, user)
+
+    pdf_bytes = build_offer_letter_pdf(**_offer_letter_fields(student, applications))
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'inline; filename="{offer_letter_filename(student.name)}"'
+            )
+        },
+    )
+
+
+@router.post("/{student_id}/offer-letter", response_model=OfferLetterResult)
+def issue_offer_letter(
+    student_id: str,
+    data: OfferLetterRequest,
+    students: StudentRepo,
+    applications: ApplicationRepo,
+    payments: PaymentRepo,
+    reports: ReportRepo,
+    storage: Storage,
+    activity_repo: ActivityRepo,
+    user: ActiveUser,
+) -> OfferLetterResult:
+    """Generate the offer letter, email it, and file it — one action.
+
+    Everything on the letter comes from the student's own record and their
+    originating application, so it cannot disagree with what they registered
+    for. Emailing is best-effort: if SMTP is down the letter is still
+    generated and filed, and `email_sent` says so. Losing the document
+    because a mail server was unreachable would be the worse outcome.
+    """
+    student = _get_or_404(students, student_id)
+    _require_owner_or_admin(student, user)
+
+    # The same rule the candidate list uses, enforced here too: a list filter
+    # is a convenience, not a guarantee, and this endpoint is reachable
+    # directly.
+    if not any(p.amount > 0 for p in payments.list_all(student_id=student.id)):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"{student.name} has not paid anything yet, so no offer letter is due.",
+        )
+
+    fields = _offer_letter_fields(student, applications)
+    pdf_bytes = build_offer_letter_pdf(**fields)
+    filename = offer_letter_filename(student.name)
+
+    # Filed under Documents so it survives as a record of what was sent, and
+    # can be re-downloaded without regenerating (and thus without the letter
+    # date silently moving to today).
+    stored_filename = f"{uuid.uuid4().hex}.pdf"
+    storage.upload(
+        stored_filename=stored_filename,
+        content=pdf_bytes,
+        content_type="application/pdf",
+    )
+    report = reports.create(
+        title=f"Offer Letter — {student.name}",
+        category="offer_letter",
+        student_id=student.id,
+        stored_filename=stored_filename,
+        original_filename=filename,
+        content_type="application/pdf",
+        file_size_bytes=len(pdf_bytes),
+        uploaded_by_id=user.id,
+    )
+
+    email_sent = email.send_email(
+        to_email=student.email,
+        subject=data.subject or email.OFFER_SUBJECT,
+        body_html=email.render_offer_body(
+            name=student.name,
+            salutation=fields["salutation"],
+            category=student.category,
+            duration_text=offer_duration_phrase(student.duration, student.category).title(),
+            custom_body=data.body or None,
+        ),
+        pdf_bytes=pdf_bytes,
+        pdf_filename=filename,
+    )
+
+    activity.record(
+        activity_repo,
+        action="student.offer_letter_issued",
+        actor_id=user.id,
+        entity_type="student",
+        entity_id=student.id,
+        summary=f"Issued offer letter to {student.name}",
+        meta={"email_sent": email_sent, "report_id": report.id},
+    )
+
+    return OfferLetterResult(
+        report_id=report.id,
+        filename=filename,
+        email_sent=email_sent,
+        emailed_to=student.email,
     )

@@ -197,3 +197,26 @@ APPLICATION_STATUS_CHOICES = [
 ]
 
 REGISTRATION_ID_PREFIX = "REG"
+
+
+# ── Institute identity ───────────────────────────────────────────────────
+# Every outgoing document and email draws its letterhead, signature and
+# reply-to from here. The two supplied templates disagreed with each other —
+# one said `dveininnovations.com`, the other `dveininnovation.com`, and they
+# signed off with different forms of the same name — so this is the single
+# agreed set. A wrong address here means a student who replies to an offer
+# letter reaches nobody, which is why it lives in one place rather than being
+# retyped into each renderer.
+COMPANY_NAME = "DVein Innovations Pvt. Ltd."
+COMPANY_EMAIL = "info@dveininnovation.com"
+COMPANY_PHONE = "+91 95001 81230"
+COMPANY_ADDRESS_LINES = (
+    "SSPDL Alpha City, Navalur, Chennai -",
+    "600130",
+)
+COMPANY_FULL_ADDRESS = "3rd Floor, Gamma Block, SSPDL - Alpha City, Navalur, Chennai - 600 130"
+
+SIGNATORY_NAME = "Sahana Ramamoorthi"
+SIGNATORY_TITLE = "Executive Head & AI Engineer"
+# The offer letter's own signature block uses the shorter form.
+SIGNATORY_TITLE_SHORT = "Executive Head"

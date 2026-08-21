@@ -14,13 +14,12 @@ from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import ActivityRepo, ApplicationRepo, CurrentUser, PaymentRepo, StudentRepo
-from app.core.constants import EMAIL_ENABLED_CATEGORIES
 from app.models.application import Application
 from app.models.user import UserRole
 from app.repositories.applications import ApplicationNotClaimable
 from app.schemas.application import ApplicationOut, ApproveRequest, RejectRequest
 from app.services import activity
-from app.services.email import render_approval_body, render_rejection_body, send_email
+from app.services.email import render_rejection_body, send_email
 from app.services.pdf_offer_letter import build_offer_letter_pdf
 
 router = APIRouter(prefix="/applications", tags=["Applications"])
@@ -111,20 +110,16 @@ def approve_application(
             recorded_by_id=user.id,
         )
 
-    subject: str | None = None
-    body: str | None = None
+    # Approving no longer emails the offer letter. It is now sent deliberately
+    # from Documents, once the HR has seen the rendered PDF — and only for a
+    # student who has actually paid something. Emailing here as well would
+    # send every student the same letter twice.
+    #
+    # The subject and body the HR composed are still recorded against the
+    # application, so the approval decision keeps its paper trail.
+    subject: str | None = data.subject or None
+    body: str | None = data.body or None
     email_sent = False
-    if app_.category in EMAIL_ENABLED_CATEGORIES:
-        subject = data.subject or f"{app_.category} Offer Letter — Dvein Innovations"
-        body = data.body or render_approval_body(app_)
-        pdf_bytes = build_offer_letter_pdf(app_)
-        email_sent = send_email(
-            to_email=app_.email,
-            subject=subject,
-            body_html=body,
-            pdf_bytes=pdf_bytes,
-            pdf_filename=f"{app_.category}_Letter_{app_.registration_id}.pdf",
-        )
 
     updated = applications.mark_approved(
         application_id, student_id=student.id, subject=subject, body=body, email_sent=email_sent
@@ -190,7 +185,17 @@ def download_offer_letter(
             status.HTTP_400_BAD_REQUEST, detail="Only an approved application has an offer letter."
         )
 
-    pdf_bytes = build_offer_letter_pdf(app_)
+    pdf_bytes = build_offer_letter_pdf(
+        name=app_.name,
+        salutation=app_.title,
+        college=app_.college,
+        place=app_.place,
+        category=app_.category,
+        domain=app_.domain,
+        duration=app_.duration,
+        start_date=app_.start_date,
+        end_date=app_.end_date,
+    )
     filename = f"{app_.category}_Letter_{app_.registration_id}.pdf"
     return StreamingResponse(
         io.BytesIO(pdf_bytes),

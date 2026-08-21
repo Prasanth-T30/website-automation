@@ -11,4 +11,11 @@ export const studentsApi = {
   issueCertificate: (id, data = {}) => api.post(`/students/${id}/certificate`, data),
   /** Preview only — downloads the PDF without emailing or filing it. */
   certificateUrl: (id) => `/api/v1/students/${id}/certificate`,
+
+  /** Students who may be sent an offer letter: anyone who has paid. */
+  offerCandidates: () => api.get("/students/offer-letter/candidates"),
+  /** Generates the offer letter, emails it, and files it under Documents. */
+  issueOfferLetter: (id, data = {}) => api.post(`/students/${id}/offer-letter`, data),
+  /** Preview only — renders the letter without emailing or filing it. */
+  offerLetterUrl: (id) => `/api/v1/students/${id}/offer-letter`,
 };

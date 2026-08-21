@@ -16,6 +16,14 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from app.core.config import settings
+from app.core.constants import (
+    COMPANY_EMAIL,
+    COMPANY_FULL_ADDRESS,
+    COMPANY_NAME,
+    COMPANY_PHONE,
+    SIGNATORY_NAME,
+    SIGNATORY_TITLE,
+)
 from app.models.application import Application
 from app.models.student import Student
 
@@ -26,19 +34,56 @@ _WRAPPER = """\
   <tr><td align="center">
     <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;font-family:Arial,sans-serif;">
       <tr><td style="background:#3569AC;padding:18px 24px;">
-        <span style="color:#ffffff;font-size:16px;font-weight:bold;">Dvein Innovations Pvt. Ltd.</span>
+        <span style="color:#ffffff;font-size:16px;font-weight:bold;">{company}</span>
       </td></tr>
       <tr><td style="padding:24px;color:#0F1B2D;font-size:14px;line-height:1.6;">
         {body}
       </td></tr>
       <tr><td style="background:#F7FAFD;padding:14px 24px;color:#5A6B82;font-size:11px;">
-        3rd Floor, Gamma Block, SSPDL - Alpha City, Navalur, Chennai - 600 130<br>
-        info@dveininnovation.com · +91 9500181230
+        {address}<br>
+        {email} &middot; {phone}
       </td></tr>
     </table>
   </td></tr>
 </table>
 """
+
+
+def _wrap(content: str) -> str:
+    """Drop a body into the branded shell.
+
+    The contact strip is filled from the shared institute identity rather
+    than typed into the template, so an email, a letterhead and a receipt can
+    never quote three different addresses.
+    """
+    return _WRAPPER.format(
+        body=content,
+        company=COMPANY_NAME,
+        address=COMPANY_FULL_ADDRESS,
+        email=COMPANY_EMAIL,
+        phone=COMPANY_PHONE,
+    )
+
+
+def _sentence_end(text: str) -> str:
+    """Close a sentence without doubling a full stop.
+
+    The company name ends in "Ltd." so appending a period gives "Ltd..".
+    """
+    return text if text.endswith(".") else f"{text}."
+
+
+def _signature() -> str:
+    """The sign-off Dvein uses on both the offer letter and the certificate."""
+    return (
+        f"<p>Warm regards,<br>"
+        f"<strong>{SIGNATORY_NAME}</strong>,<br>"
+        f"{SIGNATORY_TITLE},<br>"
+        f"{COMPANY_NAME}<br>"
+        f"{COMPANY_FULL_ADDRESS}<br>"
+        f"Email: {COMPANY_EMAIL}<br>"
+        f"Phone: {COMPANY_PHONE}</p>"
+    )
 
 
 def render_approval_body(application: Application, custom_body: str | None = None) -> str:
@@ -61,33 +106,83 @@ def render_approval_body(application: Application, custom_body: str | None = Non
             f"<p>Please find the attached {application.category.lower()} confirmation letter.</p>"
             f"<p>Thank you,<br>Training Team</p>"
         )
-    return _WRAPPER.format(body=content)
+    return _wrap(content)
+
+
+CERTIFICATE_SUBJECT = "Certificate of Internship"
+OFFER_SUBJECT = "Offer of Internship"
 
 
 def render_completion_body(student: Student, custom_body: str | None = None) -> str:
-    """Body for the certificate email.
+    """Body for the certificate email — Dvein's own wording.
 
-    Every detail is read off the student record, so the wording cannot drift
-    from what the attached certificate actually says.
+    The greeting is the only part that varies. The rest is the institute's
+    supplied copy verbatim, so what a student receives does not drift with
+    whoever pressed the button.
     """
     if custom_body:
         content = custom_body.replace("\n\n", "</p><p>").replace("\n", "<br>")
-        content = f"<p>{content}</p>"
-    else:
-        noun = {"Internship": "internship", "Course": "course", "Project": "project"}.get(
-            student.category, "programme"
-        )
-        content = (
-            f"<p>Dear {student.name},</p>"
-            f"<p>Congratulations on completing your {student.duration} {noun} programme "
-            f"in {student.domain} with us.</p>"
-            f"<p>Your completion certificate is attached. Please keep it for your records — "
-            f"the certificate number printed on it is how we look the award up if you ever "
-            f"need it verified.</p>"
-            f"<p>We wish you the very best for what comes next.</p>"
-            f"<p>Warm regards,<br>Training Team</p>"
-        )
-    return _WRAPPER.format(body=content)
+        return _wrap(f"<p>{content}</p>")
+
+    content = (
+        f"<p>Dear {student.name},</p>"
+        f"<p>Greetings from {COMPANY_NAME}</p>"
+        f"<p>Congratulations on successfully completing your internship with us. "
+        f"We appreciate your dedication, enthusiasm and active participation "
+        f"throughout the internship program.</p>"
+        f"<p>Please find your Internship Certificate attached to this email. We hope "
+        f"the knowledge and practical experience gained during your internship will "
+        f"support your academic journey and future career.</p>"
+        f"<p>On behalf of the entire DVein Innovations team, we wish you continued "
+        f"success in all your future endeavors. We look forward to seeing you achieve "
+        f"great milestones in your professional journey.</p>"
+        f"<p>If you have any questions or require any assistance, please feel free to "
+        f"contact us.</p>"
+        f"<p>Thank you for being a part of {_sentence_end(COMPANY_NAME)}</p>"
+        f"{_signature()}"
+    )
+    return _wrap(content)
+
+
+def render_offer_body(
+    *,
+    name: str,
+    salutation: str | None = None,
+    category: str | None = None,
+    duration_text: str | None = None,
+    custom_body: str | None = None,
+) -> str:
+    """Body for the offer letter email — Dvein's own wording.
+
+    `duration_text` reads back the programme the student actually chose. The
+    supplied copy says "One-Month Internship Programme", but duration is a
+    field on the form, so hardcoding a month would tell a fifteen-day intern
+    something untrue.
+    """
+    if custom_body:
+        content = custom_body.replace("\n\n", "</p><p>").replace("\n", "<br>")
+        return _wrap(f"<p>{content}</p>")
+
+    addressed = f"{salutation} {name}".strip() if salutation else name
+    noun = (category or "Internship").title()
+    programme = f"{duration_text} Programme" if duration_text else f"{noun} Programme"
+
+    content = (
+        f"<p>Dear {addressed},</p>"
+        f"<p>Greetings from {COMPANY_NAME}</p>"
+        f"<p>We are pleased to inform you that you have been selected for the "
+        f"{programme} at {_sentence_end(COMPANY_NAME)}</p>"
+        f"<p>Please find the attached {noun} Offer Letter for your reference and "
+        f"further details regarding the {noun.lower()} duration, schedule, and "
+        f"programme information.</p>"
+        f"<p>Kindly review the document and acknowledge your acceptance by replying "
+        f"to this email.</p>"
+        f"<p>We look forward to having you as part of our {noun.lower()} programme "
+        f"and wish you a valuable learning experience with us.</p>"
+        f"<p>For any further queries, feel free to contact us.</p>"
+        f"{_signature()}"
+    )
+    return _wrap(content)
 
 
 def render_rejection_body(application: Application, reason: str) -> str:
@@ -100,7 +195,7 @@ def render_rejection_body(application: Application, reason: str) -> str:
         f'<strong style="color:#B3261E;">Reason:</strong> {reason}</div>'
         f"<p>Thank you,<br>Training Team</p>"
     )
-    return _WRAPPER.format(body=content)
+    return _wrap(content)
 
 
 def send_email(

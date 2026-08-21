@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Award, FileText, Receipt, Trash2, Upload } from "lucide-react";
+import {
+  Award,
+  FileSignature,
+  FileText,
+  Receipt,
+  Send,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
@@ -15,8 +23,9 @@ import { reportsApi } from "@/features/reports/api";
 import { studentsApi } from "@/features/students/api";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { shortDate } from "@/lib/format";
+import { money, shortDate } from "@/lib/format";
 const CATEGORY_META = {
+  offer_letter: { label: "Offer Letter", icon: FileSignature, tone: "bg-brand-subtle text-brand" },
   certificate: { label: "Certificate", icon: Award, tone: "bg-success-subtle text-success" },
   call_letter: { label: "Call Letter", icon: FileText, tone: "bg-brand-subtle text-brand" },
   invoice: { label: "Invoice", icon: Receipt, tone: "bg-warn-subtle text-warn" },
@@ -24,6 +33,9 @@ const CATEGORY_META = {
 };
 const TABS = [
   { key: "all", label: "All" },
+  // Not a filter like the others: this tab is where an offer letter is
+  // generated and sent, so it leads.
+  { key: "offer_letter", label: "Offer Letters" },
   { key: "certificate", label: "Certificates" },
   { key: "call_letter", label: "Call Letters" },
   { key: "invoice", label: "Invoices" },
@@ -79,7 +91,11 @@ export default function Reports() {
         ))}
       </div>
 
-      <div className="p-6 pt-4">
+      <div className="flex flex-col gap-4 p-6 pt-4">
+        {/* The offer-letter tab does two jobs: it sends new letters, and
+            below that it lists the ones already filed. */}
+        {tab === "offer_letter" && <OfferLetterPanel />}
+
         {reports.isPending && <LoadingState label="Loading files…" />}
 
         {reports.isError && (
@@ -91,7 +107,7 @@ export default function Reports() {
           />
         )}
 
-        {reports.data && visible.length === 0 && (
+        {reports.data && visible.length === 0 && tab !== "offer_letter" && (
           <Card>
             <EmptyState icon={<FileText className="size-6" />} title="No files in this category" />
           </Card>
@@ -237,5 +253,137 @@ function UploadDialog({ open, onOpenChange, students }) {
         </div>
       </form>
     </Dialog>
+  );
+}
+
+/**
+ * Send an offer letter, without leaving Documents.
+ *
+ * Two steps on purpose: Generate renders the real PDF and shows it, Send
+ * mails that same file. An HR sees exactly what the student will receive
+ * before it leaves the building, which matters for a document that goes out
+ * under the company's name.
+ */
+function OfferLetterPanel() {
+  const queryClient = useQueryClient();
+  const [selected, setSelected] = useState(null);
+  const [query, setQuery] = useState("");
+
+  const candidates = useQuery({
+    queryKey: ["students", "offer-candidates"],
+    queryFn: studentsApi.offerCandidates,
+  });
+
+  const send = useMutation({
+    mutationFn: (id) => studentsApi.issueOfferLetter(id),
+    onSuccess: async (result) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: REPORTS_KEY }),
+        queryClient.invalidateQueries({ queryKey: ["students", "offer-candidates"] }),
+      ]);
+      setSelected(null);
+      // The letter is filed whether or not the mail server was reachable, so
+      // say which of the two actually happened rather than a bare "Done".
+      toast[result.email_sent ? "success" : "warning"](
+        result.email_sent
+          ? `Offer letter emailed to ${result.emailed_to}.`
+          : `Letter generated and filed, but the email could not be sent. Check SMTP settings.`,
+      );
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.detail : "Could not send the offer letter."),
+  });
+
+  const rows = (candidates.data ?? []).filter((c) =>
+    !query.trim() ? true : c.name.toLowerCase().includes(query.trim().toLowerCase()),
+  );
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardBody className="flex flex-col gap-3">
+          <div>
+            <h3 className="text-sm font-bold text-fg">Send an offer letter</h3>
+            <p className="mt-0.5 text-xs text-fg-muted">
+              Students who have paid appear here. The letter takes their name, domain and dates
+              from what they submitted, and goes to the email address on their registration.
+            </p>
+          </div>
+
+          <Input
+            placeholder="Search a student…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="max-w-xs"
+          />
+
+          {candidates.isPending && <LoadingState label="Loading students…" />}
+
+          {candidates.data && rows.length === 0 && (
+            <EmptyState
+              icon={<Send className="size-6" />}
+              title="Nobody is eligible yet"
+              description="A student appears here once a payment has been recorded against them."
+            />
+          )}
+
+          {rows.length > 0 && (
+            <ul className="divide-y divide-line-subtle rounded-md border border-line-subtle">
+              {rows.map((c) => (
+                <li key={c.id} className="flex items-center gap-3 px-3 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-fg">{c.name}</p>
+                    <p className="truncate text-xs text-fg-muted">
+                      {c.domain} · {c.duration} · paid {money(c.fees_paid)}
+                      {c.balance > 0 ? ` of ${money(c.total_fees)}` : " — settled"}
+                    </p>
+                  </div>
+                  {c.already_issued && <Badge tone="success">Sent</Badge>}
+                  <Button size="sm" variant="secondary" onClick={() => setSelected(c)}>
+                    <FileSignature className="size-3.5" aria-hidden /> Generate
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardBody>
+      </Card>
+
+      {selected && (
+        <Dialog
+          open
+          onOpenChange={(o) => !o && setSelected(null)}
+          title={`Offer letter — ${selected.name}`}
+          description={`Review it, then send to ${selected.email}.`}
+          className="max-w-3xl"
+        >
+          <div className="flex flex-col gap-4">
+            {selected.already_issued && (
+              <p className="rounded-md border border-warn/30 bg-warn-subtle px-3 py-2 text-xs text-warn-text">
+                An offer letter has already been sent to {selected.name}. Sending again will
+                deliver a second copy.
+              </p>
+            )}
+
+            {/* The preview endpoint renders the same bytes the send will
+                attach, so what is on screen is what arrives. */}
+            <iframe
+              title={`Offer letter preview for ${selected.name}`}
+              src={studentsApi.offerLetterUrl(selected.id)}
+              className="h-[60vh] w-full rounded-md border border-line bg-subtle"
+            />
+
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setSelected(null)}>
+                Cancel
+              </Button>
+              <Button onClick={() => send.mutate(selected.id)} loading={send.isPending}>
+                <Send className="size-4" aria-hidden /> Send email
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+    </div>
   );
 }

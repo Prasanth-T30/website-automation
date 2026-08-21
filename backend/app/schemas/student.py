@@ -146,3 +146,42 @@ class StudentReassignResult(BaseModel):
     revenue_moved: float
     from_owner_name: str | None = None
     to_owner_name: str
+
+
+class OfferLetterRequest(BaseModel):
+    """Both optional — the defaults come from the student's own record."""
+
+    subject: str = Field(default="", max_length=200)
+    body: str = ""
+
+
+class OfferLetterResult(BaseModel):
+    report_id: str
+    filename: str
+    # False when SMTP isn't configured or the send failed. The letter is
+    # generated and filed either way, so the UI must say which happened.
+    email_sent: bool
+    emailed_to: str
+
+
+class OfferCandidate(BaseModel):
+    """One student eligible for an offer letter.
+
+    Eligibility is "has paid something" rather than "settled in full": the
+    letter goes out on the deposit, which is what secures the seat, not after
+    the last installment.
+    """
+
+    id: str
+    name: str
+    email: str
+    college: str | None = None
+    category: str | None = None
+    domain: str | None = None
+    duration: str | None = None
+    total_fees: float
+    fees_paid: float
+    balance: float
+    # Whether a letter has already been filed for them, so the screen can say
+    # "sent" rather than letting an HR send the same letter twice by accident.
+    already_issued: bool = False
