@@ -131,9 +131,36 @@ const RegistrationForm = () => {
     validate: (value) => isValidPhone(value) || "Enter a valid email or mobile number",
   });
 
+  /**
+   * Bring the first thing that failed into view.
+   *
+   * `trigger` reports failure but, unlike `handleSubmit`, never moves focus.
+   * On a step whose invalid field sits below the fold that made Continue look
+   * like a dead button. Scrolling to the message rather than calling
+   * `setFocus` handles the date fields too: those validate a hidden input that
+   * cannot take focus, so only their message is reachable.
+   */
+  const revealFirstError = () => {
+    // Let React paint the messages `trigger` just produced. A timeout rather
+    // than requestAnimationFrame: rAF is paused in a backgrounded tab, so a
+    // form restored into a hidden tab would never reveal its error.
+    setTimeout(() => {
+      const message = formRef.current?.querySelector("[data-error-message]");
+      if (!message) return;
+      message.scrollIntoView({ behavior: "smooth", block: "center" });
+      const field = message.parentElement?.querySelector(
+        "input:not([type=hidden]), select, textarea",
+      );
+      field?.focus({ preventScroll: true });
+    }, 0);
+  };
+
   const goNext = async () => {
     const ok = await trigger(stepFields[step] || []);
-    if (!ok) return;
+    if (!ok) {
+      revealFirstError();
+      return;
+    }
     if (step === 4 && !file) {
       toast.error("Please upload your payment screenshot");
       return;
@@ -429,7 +456,7 @@ const RegistrationForm = () => {
                   </div>
                 </DatePicker>
                 <input type="hidden" {...register("start_date", { required: "Start date is required" })} />
-                {errors.start_date?.message && <p className="mt-1 text-xs font-medium text-[#C2453F]">{errors.start_date.message}</p>}
+                {errors.start_date?.message && <p data-error-message className="mt-1 text-xs font-medium text-[#C2453F]">{errors.start_date.message}</p>}
               </div>
 
               <div>
@@ -457,7 +484,7 @@ const RegistrationForm = () => {
                   </div>
                 </DatePicker>
                 <input type="hidden" {...register("end_date", { required: "End date is required" })} />
-                {errors.end_date?.message && <p className="mt-1 text-xs font-medium text-[#C2453F]">{errors.end_date.message}</p>}
+                {errors.end_date?.message && <p data-error-message className="mt-1 text-xs font-medium text-[#C2453F]">{errors.end_date.message}</p>}
               </div>
 
               <div className="flex justify-center sm:col-span-2">
