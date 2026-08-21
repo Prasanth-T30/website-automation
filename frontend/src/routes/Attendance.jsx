@@ -14,12 +14,16 @@ import { studentsApi } from "@/features/students/api";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { shortDate } from "@/lib/format";
-const CYCLE = ["present", "late", "absent"];
-const LABEL = { present: "P", late: "L", absent: "A" };
+// Two states, which is what a trainer actually records: they either turned up
+// or they did not. A third ("late") made every cell a three-way guess and
+// meant two clicks to reach Absent. Existing records that still carry it stay
+// readable — the cell just renders what is stored.
+const CYCLE = ["present", "absent"];
+const LABEL = { present: "P", absent: "A", late: "L" };
 const STYLE = {
   present: "bg-success-subtle text-success-text border-success/30",
-  late: "bg-warn-subtle text-warn-text border-warn/30",
   absent: "bg-danger-subtle text-danger-text border-danger/30",
+  late: "bg-warn-subtle text-warn-text border-warn/30",
 };
 function isoDate(d) {
   return d.toISOString().slice(0, 10);
@@ -58,30 +62,44 @@ export default function Attendance() {
     onError: (err) =>
       toast.error(err instanceof ApiError ? err.detail : "Could not mark attendance."),
   });
-  const cycle = (studentId, date) => {
-    const current = statusMap.get(`${studentId}|${date}`);
-    const next =
-      current === undefined ? "present" : CYCLE[(CYCLE.indexOf(current) + 1) % CYCLE.length];
-    mark.mutate({ student_id: studentId, batch_id: activeBatchId, date, status: next });
+  /** Set a cell outright — each state is its own button. */
+  const setStatus = (studentId, date, status) => {
+    mark.mutate({ student_id: studentId, batch_id: activeBatchId, date, status });
   };
-  const markAllPresent = () => {
+
+  const markAllToday = (status) => {
     if (!activeBatchId || !roster.data) return;
     const today = DATES[DATES.length - 1];
     for (const s of roster.data) {
-      mark.mutate({ student_id: s.id, batch_id: activeBatchId, date: today, status: "present" });
+      mark.mutate({ student_id: s.id, batch_id: activeBatchId, date: today, status });
     }
-    toast.success(`Marking ${roster.data.length} students present for today.`);
+    toast.success(
+      `Marking ${roster.data.length} student${roster.data.length === 1 ? "" : "s"} ` +
+        `${status} for today.`,
+    );
   };
   const activeRoster = (roster.data ?? []).filter((s) => s.status === "active");
   return (
     <>
       <PageHeader
         title="Attendance"
-        description="Click a cell to cycle Present → Late → Absent."
+        description="Click a cell to toggle Present or Absent."
         action={
-          <Button onClick={markAllPresent} disabled={!activeBatchId || !roster.data?.length}>
-            Mark today all present
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => markAllToday("absent")}
+              disabled={!activeBatchId || !roster.data?.length}
+            >
+              All absent today
+            </Button>
+            <Button
+              onClick={() => markAllToday("present")}
+              disabled={!activeBatchId || !roster.data?.length}
+            >
+              All present today
+            </Button>
+          </div>
         }
       />
 
@@ -171,18 +189,41 @@ export default function Attendance() {
                             const marked = statusMap.get(`${s.id}|${d}`);
                             return (
                               <td key={d} className="px-2 py-2 text-center">
-                                <button
-                                  onClick={() => cycle(s.id, d)}
-                                  className={cn(
-                                    "inline-flex size-7 items-center justify-center rounded-full border text-xs font-bold transition-transform hover:scale-110",
-                                    marked
-                                      ? STYLE[marked]
-                                      : "border-line-subtle text-fg-muted hover:border-line",
-                                  )}
-                                  title={marked ?? "Not marked"}
+                                {/* Both states are their own button rather
+                                    than one cell that cycles: a toggle makes
+                                    the HR work out what a click will do, and
+                                    marking someone absent should not require
+                                    passing through "present" first. */}
+                                <div
+                                  role="group"
+                                  aria-label={`${s.name} on ${d}`}
+                                  className="inline-flex overflow-hidden rounded-full border border-line-subtle"
                                 >
-                                  {marked ? LABEL[marked] : "—"}
-                                </button>
+                                  {CYCLE.map((option) => (
+                                    <button
+                                      key={option}
+                                      type="button"
+                                      onClick={() => setStatus(s.id, d, option)}
+                                      aria-pressed={marked === option}
+                                      title={`Mark ${option}`}
+                                      className={cn(
+                                        "flex size-7 items-center justify-center text-xs font-bold transition-colors",
+                                        marked === option
+                                          ? STYLE[option]
+                                          : "text-fg-muted hover:bg-subtle",
+                                      )}
+                                    >
+                                      {LABEL[option]}
+                                    </button>
+                                  ))}
+                                </div>
+                                {/* A record left over from the retired third
+                                    state still has to be legible. */}
+                                {marked && !CYCLE.includes(marked) && (
+                                  <p className="mt-0.5 text-[10px] text-warn-text">
+                                    {LABEL[marked]}
+                                  </p>
+                                )}
                               </td>
                             );
                           })}

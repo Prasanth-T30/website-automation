@@ -12,6 +12,7 @@ import {
   Search,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
@@ -21,6 +22,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { Field } from "@/components/ui/Field";
 import { Input } from "@/components/ui/Input";
 import { Pagination, usePagination } from "@/components/ui/Pagination";
+import { SlideOver } from "@/components/ui/SlideOver";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/States";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { batchesApi } from "@/features/batches/api";
@@ -29,8 +31,8 @@ import { studentsApi } from "@/features/students/api";
 import { isOverdue } from "@/features/students/overdue";
 import { usersApi } from "@/features/users/api";
 import { ApiError } from "@/lib/api";
-import { toast } from "sonner";
 import { money, shortDate } from "@/lib/format";
+
 const METHOD_TONE = {
   cash: "neutral",
   upi: "brand",
@@ -50,6 +52,7 @@ const PAYMENT_METHOD_FILTERS = [
 const filterSelectClass =
   "h-10 max-w-[16rem] rounded-md border border-line bg-surface px-2.5 text-xs font-semibold " +
   "text-fg-secondary outline-none transition-colors focus:border-brand";
+
 function StatTile({ icon: Icon, label, value, tone }) {
   return (
     <Card>
@@ -65,81 +68,95 @@ function StatTile({ icon: Icon, label, value, tone }) {
     </Card>
   );
 }
+
 export default function Payments() {
   const { user, isAdmin } = useAuth();
+  const queryClient = useQueryClient();
   const [collegeFilter, setCollegeFilter] = useState("all");
   const [methodFilter, setMethodFilter] = useState("all");
   const [feeStatusFilter, setFeeStatusFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const [openStudent, setOpenStudent] = useState(null);
   const [recordFor, setRecordFor] = useState(null);
   const [editFeeFor, setEditFeeFor] = useState(null);
-  const queryClient = useQueryClient();
-  const [receiptQuery, setReceiptQuery] = useState("");
-  // Cross-HR revenue comparison is admin-only (the leaderboard lives on
-  // /admin/hr-performance) — an HR's own ledger and stats only cover
-  // students/transactions attributed to them, even though both list
-  // endpoints stay open reads at the API level (same as Students).
+
+  // Both come back already scoped: an HR's own students and own transactions,
+  // everyone's for an admin.
   const transactions = useQuery({
     queryKey: ["payments", { mine: !isAdmin }],
     queryFn: () => paymentsApi.list(isAdmin ? undefined : { mine: true }),
   });
   const students = useQuery({ queryKey: ["students"], queryFn: () => studentsApi.list() });
   const batches = useQuery({ queryKey: ["batches"], queryFn: () => batchesApi.list() });
-  // Admin-only: turns owner ids into names for the "Collected by" column.
-  // An HR would get a 403 here, and has no use for it — every row is theirs.
-  const staff = useQuery({
-    queryKey: ["users"],
-    queryFn: usersApi.list,
-    enabled: isAdmin,
-  });
-  const staffName = (id) =>
-    (staff.data ?? []).find((u) => u.id === id)?.full_name ?? "—";
-  const studentById = useMemo(
-    () => new Map((students.data ?? []).map((s) => [s.id, s])),
-    [students.data],
-  );
-  const studentName = (id) => studentById.get(id)?.name ?? id;
-  /** What a student still owes. Negative balances are clamped: over-payment
-   *  is settled, not credit. */
+  const staff = useQuery({ queryKey: ["users"], queryFn: usersApi.list, enabled: isAdmin });
+  const staffName = (id) => (staff.data ?? []).find((u) => u.id === id)?.full_name ?? "—";
+
   const balanceOf = (s) => (s ? Math.max(0, s.total_fees - s.fees_paid) : 0);
   /** Recording and fee edits belong to whoever claimed the student. The API
    *  enforces this too (403); this only decides whether to offer the control
    *  rather than let someone click into a refusal. */
   const canEdit = (s) => Boolean(s) && (isAdmin || s.owner_id === user?.id);
 
-  // A transaction carries no college of its own — it inherits the one on the
-  // student it belongs to, which is what "filter the finance page by college"
-  // has to mean.
+  /**
+   * One row per student, not per transaction.
+   *
+   * A ledger repeats a name once for every installment, and the fee columns
+   * beside it repeat the same student-level total on each of those rows — so
+   * three payments looked like three debts. Finance answers "who owes what",
+   * which is a question about people; the individual transactions belong in
+   * that person's own history, one click away.
+   */
+  const perStudent = useMemo(() => {
+    const byStudent = new Map();
+    for (const t of transactions.data ?? []) {
+      if (!byStudent.has(t.student_id)) byStudent.set(t.student_id, []);
+      byStudent.get(t.student_id).push(t);
+    }
+    return (students.data ?? [])
+      .map((s) => {
+        const rows = byStudent.get(s.id) ?? [];
+        const latest = rows.reduce(
+          (newest, t) =>
+            !newest || (t.created_at && t.created_at > newest.created_at) ? t : newest,
+          null,
+        );
+        return {
+          student: s,
+          payments: rows,
+          collected: rows.reduce((sum, t) => sum + t.amount, 0),
+          balance: balanceOf(s),
+          lastPaidAt: latest?.created_at ?? null,
+          methods: new Set(rows.map((t) => t.method ?? "other")),
+        };
+      })
+      .sort((a, b) => b.balance - a.balance || a.student.name.localeCompare(b.student.name));
+  }, [transactions.data, students.data]);
+
   const colleges = useMemo(() => {
     const seen = new Set();
-    for (const t of transactions.data ?? []) {
-      const college = studentById.get(t.student_id)?.college;
-      if (college) seen.add(college);
-    }
+    for (const s of students.data ?? []) if (s.college) seen.add(s.college);
     return [...seen].sort((a, b) => a.localeCompare(b));
-  }, [transactions.data, studentById]);
+  }, [students.data]);
 
-  const visibleTransactions = useMemo(() => {
-    return (transactions.data ?? []).filter((t) => {
-      if (methodFilter !== "all" && (t.method ?? "other") !== methodFilter) return false;
-      if (feeStatusFilter !== "all") {
-        // Fee status belongs to the student: a payment counts as "fully paid"
-        // when the student it belongs to owes nothing further.
-        const owed = balanceOf(studentById.get(t.student_id));
-        if (feeStatusFilter === "paid" ? owed > 0 : owed <= 0) return false;
-      }
-      if (collegeFilter !== "all" && studentById.get(t.student_id)?.college !== collegeFilter) {
-        return false;
-      }
-      if (!receiptQuery.trim()) return true;
-      const q = receiptQuery.trim().toLowerCase();
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return perStudent.filter((r) => {
+      if (collegeFilter !== "all" && r.student.college !== collegeFilter) return false;
+      if (feeStatusFilter === "paid" && r.balance > 0) return false;
+      if (feeStatusFilter === "pending" && r.balance <= 0) return false;
+      // A method belongs to a transaction, so at student level this reads as
+      // "has ever paid this way" — which is what someone reconciling a cash
+      // book is actually looking for.
+      if (methodFilter !== "all" && !r.methods.has(methodFilter)) return false;
+      if (!needle) return true;
       return (
-        t.receipt_number.toLowerCase().includes(q) ||
-        (studentById.get(t.student_id)?.name ?? "").toLowerCase().includes(q)
+        r.student.name.toLowerCase().includes(needle) ||
+        r.payments.some((t) => t.receipt_number.toLowerCase().includes(needle))
       );
     });
-  }, [transactions.data, studentById, methodFilter, collegeFilter, receiptQuery, feeStatusFilter]);
+  }, [perStudent, collegeFilter, feeStatusFilter, methodFilter, query]);
 
-  const paging = usePagination(visibleTransactions);
+  const paging = usePagination(visible);
 
   const refreshMoney = async () => {
     await Promise.all([
@@ -149,34 +166,37 @@ export default function Payments() {
     ]);
   };
 
-  // Mirrors the filters above so a download matches the table on screen.
-  // `mine` tracks the same admin/HR scoping the list query already uses.
+  // The export stays a transaction ledger — that is what an accountant needs —
+  // but carries the screen's filters so it covers the same people.
   const exportFilters = {
     mine: !isAdmin,
     method: methodFilter,
     college: collegeFilter,
-    q: receiptQuery,
+    q: query,
     fee_status: feeStatusFilter,
   };
 
   const summary = useMemo(() => {
-    const rows = (students.data ?? []).filter((s) => isAdmin || s.owner_id === user?.id);
     const batchesById = new Map((batches.data ?? []).map((b) => [b.id, b]));
-    const unpaid = rows.filter((s) => s.total_fees - s.fees_paid > 0);
-    const overdue = unpaid.filter((s) => isOverdue(s, batchesById));
-    const pending = unpaid.filter((s) => !isOverdue(s, batchesById));
+    const unpaid = perStudent.filter((r) => r.balance > 0);
+    const overdue = unpaid.filter((r) => isOverdue(r.student, batchesById));
     return {
-      totalRevenue: (transactions.data ?? []).reduce((sum, t) => sum + t.amount, 0),
-      pendingAmount: pending.reduce((sum, s) => sum + (s.total_fees - s.fees_paid), 0),
-      overdueAmount: overdue.reduce((sum, s) => sum + (s.total_fees - s.fees_paid), 0),
-      paidCount: rows.filter((s) => s.total_fees - s.fees_paid <= 0).length,
+      totalRevenue: perStudent.reduce((sum, r) => sum + r.collected, 0),
+      pendingAmount: unpaid
+        .filter((r) => !isOverdue(r.student, batchesById))
+        .reduce((sum, r) => sum + r.balance, 0),
+      overdueAmount: overdue.reduce((sum, r) => sum + r.balance, 0),
+      paidCount: perStudent.filter((r) => r.balance <= 0).length,
     };
-  }, [transactions.data, students.data, batches.data, isAdmin, user?.id]);
+  }, [perStudent, batches.data]);
+
+  const openRow = openStudent ? perStudent.find((r) => r.student.id === openStudent) : null;
+
   return (
     <>
       <PageHeader
         title="Payments"
-        description="Every recorded transaction, newest first. Record a payment or adjust a fee straight from the row."
+        description="What each student owes and has paid. Open a name for their full payment history."
         action={
           <div className="flex items-center gap-2">
             <Button onClick={() => setRecordFor({})}>
@@ -222,7 +242,7 @@ export default function Payments() {
         <StatTile
           icon={CheckCircle2}
           label="Fully Paid"
-          value={`${summary.paidCount} students`}
+          value={String(summary.paidCount)}
           tone="bg-brand-subtle text-brand"
         />
       </div>
@@ -232,9 +252,9 @@ export default function Payments() {
           <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-fg-muted" />
           <Input
             className="pl-9"
-            placeholder="Search receipt or student…"
-            value={receiptQuery}
-            onChange={(e) => setReceiptQuery(e.target.value)}
+            placeholder="Search student or receipt…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
           />
         </div>
 
@@ -272,7 +292,7 @@ export default function Payments() {
           <option value="all">All methods</option>
           {PAYMENT_METHOD_FILTERS.map((m) => (
             <option key={m.value} value={m.value}>
-              {m.label}
+              Paid by {m.label}
             </option>
           ))}
         </select>
@@ -280,36 +300,43 @@ export default function Payments() {
 
       <div className="p-6 pt-4">
         <Card className="overflow-hidden">
-          {transactions.isPending && <LoadingState label="Loading transactions…" />}
+          {(students.isPending || transactions.isPending) && (
+            <LoadingState label="Loading payments…" />
+          )}
 
           {transactions.isError && (
             <ErrorState
               description={
                 transactions.error instanceof ApiError
                   ? transactions.error.detail
-                  : "Could not load transactions."
+                  : "Could not load payments."
               }
               onRetry={() => transactions.refetch()}
             />
           )}
 
-          {transactions.data && transactions.data.length === 0 && (
+          {students.data && perStudent.length === 0 && (
             <EmptyState
               icon={<Banknote className="size-6" />}
-              title="No payments recorded yet"
-              description="Record one from a student's detail panel to see it here."
+              title="No students yet"
+              description="Approve an application to start tracking fees."
             />
           )}
 
-          {visibleTransactions.length > 0 && (
+          {visible.length > 0 && (
             <div className="scroll-x">
-              <table className="w-full min-w-[940px] text-sm">
+              <table className="w-full min-w-[860px] text-sm">
                 <thead>
                   <tr className="border-b border-line-subtle bg-subtle/60 text-left">
                     {[
-                      "Receipt", "Student", "Amount", "Paid", "Pending",
-                      ...(isAdmin ? ["Collected by"] : []),
-                      "Method", "Date", "",
+                      "Student",
+                      "Total fee",
+                      "Paid",
+                      "Pending",
+                      "Payments",
+                      ...(isAdmin ? ["HR"] : []),
+                      "Last payment",
+                      "",
                     ].map((h) => (
                       <th
                         key={h}
@@ -321,76 +348,60 @@ export default function Payments() {
                   </tr>
                 </thead>
                 <tbody>
-                  {paging.pageItems.map((t) => (
-                    <tr key={t.id} className="border-b border-line-subtle last:border-0">
-                      <td className="px-4 py-3 font-mono text-xs text-fg-secondary">
-                        {t.receipt_number}
-                      </td>
+                  {paging.pageItems.map((r) => (
+                    <tr
+                      key={r.student.id}
+                      onClick={() => setOpenStudent(r.student.id)}
+                      className="cursor-pointer border-b border-line-subtle transition-colors last:border-0 hover:bg-subtle/60"
+                    >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <Avatar name={studentName(t.student_id)} size="sm" />
-                          <span className="font-medium text-fg">{studentName(t.student_id)}</span>
+                          <Avatar name={r.student.name} size="sm" />
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-fg">{r.student.name}</p>
+                            <p className="truncate text-xs text-fg-muted">{r.student.college}</p>
+                          </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 font-semibold text-fg">{money(t.amount)}</td>
-                      {/* The student's overall position, not this one payment —
-                          a ledger row alone never says what is still owed. */}
                       <td className="px-4 py-3 tabular-nums text-fg-secondary">
-                        {studentById.has(t.student_id)
-                          ? money(studentById.get(t.student_id).fees_paid)
-                          : "—"}
+                        {money(r.student.total_fees)}
+                      </td>
+                      <td className="px-4 py-3 font-semibold tabular-nums text-fg">
+                        {money(r.student.fees_paid)}
                       </td>
                       <td className="px-4 py-3 tabular-nums font-semibold">
-                        {studentById.has(t.student_id) ? (
-                          balanceOf(studentById.get(t.student_id)) > 0 ? (
-                            <span className="text-warn-text">
-                              {money(balanceOf(studentById.get(t.student_id)))}
-                            </span>
-                          ) : (
-                            <span className="text-success-text">Settled</span>
-                          )
+                        {r.balance > 0 ? (
+                          <span className="text-warn-text">{money(r.balance)}</span>
                         ) : (
-                          "—"
+                          <span className="text-success-text">Settled</span>
                         )}
                       </td>
-                      {/* Attribution, admin only: an HR's ledger is entirely
-                          their own, so the column would say the same name on
-                          every row. `owner_id` is who the revenue is credited
-                          to, which is the question the admin is asking. */}
-                      {isAdmin && (
-                        <td className="px-4 py-3 text-xs text-fg-secondary">
-                          {staffName(t.owner_id)}
-                        </td>
-                      )}
                       <td className="px-4 py-3">
-                        <Badge
-                          tone={t.method ? METHOD_TONE[t.method] : "neutral"}
-                          className="uppercase"
-                        >
-                          {(t.method ?? "—").replace("_", " ")}
+                        <Badge tone={r.payments.length ? "brand" : "neutral"}>
+                          {r.payments.length}
                         </Badge>
                       </td>
+                      {isAdmin && (
+                        <td className="px-4 py-3 text-xs text-fg-secondary">
+                          {staffName(r.student.owner_id)}
+                        </td>
+                      )}
                       <td className="px-4 py-3 text-xs text-fg-muted">
-                        {t.created_at ? shortDate(t.created_at) : "—"}
+                        {r.lastPaidAt ? shortDate(r.lastPaidAt) : "—"}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <a
-                            href={paymentsApi.receiptUrl(t.id)}
-                            className="flex items-center gap-1 text-xs font-semibold text-[var(--brand-text)] hover:underline"
+                        {canEdit(r.student) && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditFeeFor(r.student);
+                            }}
+                            className="flex items-center gap-1 text-xs font-semibold text-fg-secondary hover:text-fg hover:underline"
                           >
-                            <Download className="size-3.5" /> Receipt
-                          </a>
-                          {canEdit(studentById.get(t.student_id)) && (
-                            <button
-                              type="button"
-                              onClick={() => setEditFeeFor(studentById.get(t.student_id))}
-                              className="flex items-center gap-1 text-xs font-semibold text-fg-secondary hover:text-fg hover:underline"
-                            >
-                              <Pencil className="size-3.5" aria-hidden /> Edit fee
-                            </button>
-                          )}
-                        </div>
+                            <Pencil className="size-3.5" aria-hidden /> Edit fee
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -399,25 +410,41 @@ export default function Payments() {
             </div>
           )}
 
-          {/* Filters can empty the table even though transactions exist —
-              say so, rather than showing a bare header row. */}
-          {transactions.data &&
-            transactions.data.length > 0 &&
-            visibleTransactions.length === 0 && (
-              <EmptyState
-                icon={<Banknote className="size-6" />}
-                title="No matching transactions"
-                description="Try a different college, method, or search term."
-              />
-            )}
+          {/* Filters can empty the table even though students exist — say so,
+              rather than showing a bare header row. */}
+          {perStudent.length > 0 && visible.length === 0 && (
+            <EmptyState
+              icon={<Banknote className="size-6" />}
+              title="No matching students"
+              description="Try a different college, fee status, method, or search term."
+            />
+          )}
 
-          {visibleTransactions.length > 0 && <Pagination {...paging} label="transactions" />}
+          {visible.length > 0 && <Pagination {...paging} label="students" />}
         </Card>
       </div>
+
+      {openRow && (
+        <StudentPayments
+          row={openRow}
+          canEdit={canEdit(openRow.student)}
+          ownerName={isAdmin ? staffName(openRow.student.owner_id) : null}
+          onClose={() => setOpenStudent(null)}
+          onRecord={() => {
+            setRecordFor({ preselect: openRow.student.id });
+            setOpenStudent(null);
+          }}
+          onEditFee={() => {
+            setEditFeeFor(openRow.student);
+            setOpenStudent(null);
+          }}
+        />
+      )}
 
       {recordFor && (
         <RecordPaymentDialog
           students={(students.data ?? []).filter(canEdit)}
+          preselect={recordFor.preselect}
           balanceOf={balanceOf}
           onClose={() => setRecordFor(null)}
           onDone={refreshMoney}
@@ -434,9 +461,115 @@ export default function Payments() {
   );
 }
 
+/** Everything about one student's money: where they stand, and every
+ *  transaction that got them there. */
+function StudentPayments({ row, canEdit, ownerName, onClose, onRecord, onEditFee }) {
+  const { student, payments, balance } = row;
+  const ordered = [...payments].sort((a, b) =>
+    (b.created_at ?? "").localeCompare(a.created_at ?? ""),
+  );
+
+  return (
+    <SlideOver open onOpenChange={(o) => !o && onClose()} title={student.name}>
+      <div className="flex flex-col gap-5 p-5">
+        <Card>
+          <CardBody className="flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-md border border-line-subtle bg-subtle p-3">
+                <p className="text-[10px] font-bold tracking-wide text-fg-muted uppercase">Paid</p>
+                <p className="mt-0.5 text-lg font-extrabold tabular-nums text-success-text">
+                  {money(student.fees_paid)}
+                </p>
+              </div>
+              <div className="rounded-md border border-line-subtle bg-subtle p-3">
+                <p className="text-[10px] font-bold tracking-wide text-fg-muted uppercase">
+                  Pending
+                </p>
+                <p
+                  className={`mt-0.5 text-lg font-extrabold tabular-nums ${
+                    balance > 0 ? "text-warn-text" : "text-success-text"
+                  }`}
+                >
+                  {balance > 0 ? money(balance) : "Settled"}
+                </p>
+              </div>
+            </div>
+
+            <dl className="grid grid-cols-2 gap-2 text-sm">
+              <dt className="text-fg-muted">Total fee</dt>
+              <dd className="text-right tabular-nums text-fg">{money(student.total_fees)}</dd>
+              <dt className="text-fg-muted">Programme</dt>
+              <dd className="text-right text-fg">{student.domain ?? "—"}</dd>
+              <dt className="text-fg-muted">College</dt>
+              <dd className="truncate text-right text-fg">{student.college ?? "—"}</dd>
+              {ownerName && (
+                <>
+                  <dt className="text-fg-muted">Claimed by</dt>
+                  <dd className="text-right text-fg">{ownerName}</dd>
+                </>
+              )}
+            </dl>
+
+            {canEdit && (
+              <div className="flex gap-2">
+                <Button size="sm" onClick={onRecord} className="flex-1">
+                  <Plus className="size-3.5" aria-hidden /> Record payment
+                </Button>
+                <Button size="sm" variant="secondary" onClick={onEditFee} className="flex-1">
+                  <Pencil className="size-3.5" aria-hidden /> Edit fee
+                </Button>
+              </div>
+            )}
+          </CardBody>
+        </Card>
+
+        <div>
+          <h3 className="mb-2 text-xs font-bold tracking-wide text-fg-muted uppercase">
+            Payment history ({ordered.length})
+          </h3>
+
+          {ordered.length === 0 && (
+            <p className="rounded-md border border-line-subtle px-3 py-6 text-center text-xs text-fg-muted">
+              Nothing recorded yet — the whole fee is outstanding.
+            </p>
+          )}
+
+          {ordered.length > 0 && (
+            <ul className="divide-y divide-line-subtle rounded-md border border-line-subtle">
+              {ordered.map((t) => (
+                <li key={t.id} className="flex items-center gap-3 px-3 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-xs text-fg-secondary">{t.receipt_number}</p>
+                    <p className="text-[11px] text-fg-muted">
+                      {t.created_at ? shortDate(t.created_at) : "—"}
+                    </p>
+                  </div>
+                  <Badge tone={t.method ? METHOD_TONE[t.method] : "neutral"} className="uppercase">
+                    {(t.method ?? "—").replace("_", " ")}
+                  </Badge>
+                  <span className="w-24 text-right font-semibold tabular-nums text-fg">
+                    {money(t.amount)}
+                  </span>
+                  <a
+                    href={paymentsApi.receiptUrl(t.id)}
+                    className="text-fg-muted transition-colors hover:text-fg"
+                    aria-label={`Download receipt ${t.receipt_number}`}
+                  >
+                    <Download className="size-4" aria-hidden />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </SlideOver>
+  );
+}
+
 /** Record an installment against a student, without leaving Finance. */
-function RecordPaymentDialog({ students, balanceOf, onClose, onDone }) {
-  const [studentId, setStudentId] = useState("");
+function RecordPaymentDialog({ students, preselect, balanceOf, onClose, onDone }) {
+  const [studentId, setStudentId] = useState(preselect ?? "");
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("cash");
   const chosen = students.find((s) => s.id === studentId);
@@ -471,7 +604,7 @@ function RecordPaymentDialog({ students, balanceOf, onClose, onDone }) {
       <div className="flex flex-col gap-4">
         <Field label="Student" required>
           <select
-            className={filterSelectClass + " w-full"}
+            className={filterSelectClass + " w-full max-w-none"}
             value={studentId}
             onChange={(e) => setStudentId(e.target.value)}
           >
@@ -513,7 +646,7 @@ function RecordPaymentDialog({ students, balanceOf, onClose, onDone }) {
           </Field>
           <Field label="Method">
             <select
-              className={filterSelectClass + " w-full"}
+              className={filterSelectClass + " w-full max-w-none"}
               value={method}
               onChange={(e) => setMethod(e.target.value)}
             >
