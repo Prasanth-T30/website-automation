@@ -10,7 +10,8 @@ export const paymentsApi = {
    * as `method=all`, which the API would read as a real method name.
    *
    * @param {"xlsx" | "pdf"} format
-   * @param {{ mine?: boolean, method?: string, college?: string, q?: string }} [filters]
+   * @param {{ mine?: boolean, method?: string, college?: string, q?: string,
+   *           fee_status?: "all" | "paid" | "pending" }} [filters]
    */
   exportUrl: (format, filters = {}) => {
     const params = {};
@@ -18,6 +19,9 @@ export const paymentsApi = {
     if (filters.method && filters.method !== "all") params.method = filters.method;
     if (filters.college && filters.college !== "all") params.college = filters.college;
     if (filters.q?.trim()) params.q = filters.q.trim();
+    if (filters.fee_status && filters.fee_status !== "all") {
+      params.fee_status = filters.fee_status;
+    }
     const qs = new URLSearchParams(params).toString();
     return api.url(`/payments/export.${format}${qs ? `?${qs}` : ""}`);
   },

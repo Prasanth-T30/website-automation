@@ -45,6 +45,7 @@ def _filtered_for_export(
     method: str | None,
     college: str | None,
     q: str | None,
+    fee_status: str | None = None,
 ) -> tuple[list, dict[str, Student], dict[str, str], str]:
     """Re-apply the Finance screen's filters server-side.
 
@@ -68,6 +69,14 @@ def _filtered_for_export(
             if needle in p.receipt_number.lower()
             or ((s := students_by_id.get(p.student_id)) is not None and needle in s.name.lower())
         ]
+    if fee_status in ("paid", "pending"):
+        # Fee status belongs to the student, not the transaction: a payment is
+        # "fully paid" when the student it belongs to owes nothing further.
+        def settled(p) -> bool:
+            s = students_by_id.get(p.student_id)
+            return s is not None and s.total_fees - s.fees_paid <= 0
+
+        rows = [p for p in rows if settled(p) == (fee_status == "paid")]
 
     owner_names = {u.id: u.full_name for u in users.list_all()}
 
@@ -78,6 +87,8 @@ def _filtered_for_export(
         parts.append(f"College: {college}")
     if q:
         parts.append(f"Search: {q}")
+    if fee_status in ("paid", "pending"):
+        parts.append("Fully paid" if fee_status == "paid" else "Pending balance")
     if owner_id:
         parts.append("Mine only")
     return rows, students_by_id, owner_names, " · ".join(parts)
@@ -117,10 +128,12 @@ def export_payments_xlsx(
     method: str | None = Query(None),
     college: str | None = Query(None),
     q: str | None = Query(None),
+    fee_status: str | None = Query(None, description="paid | pending"),
 ) -> StreamingResponse:
     rows, by_id, owners, note = _filtered_for_export(
         payments, students, users,
         owner_id=_revenue_scope(user, mine), method=method, college=college, q=q,
+        fee_status=fee_status,
     )
     content = build_payments_xlsx(rows, by_id, owners, filter_note=note)
     stamp = datetime.now(UTC).strftime("%Y%m%d")
@@ -141,10 +154,12 @@ def export_payments_pdf(
     method: str | None = Query(None),
     college: str | None = Query(None),
     q: str | None = Query(None),
+    fee_status: str | None = Query(None, description="paid | pending"),
 ) -> StreamingResponse:
     rows, by_id, owners, note = _filtered_for_export(
         payments, students, users,
         owner_id=_revenue_scope(user, mine), method=method, college=college, q=q,
+        fee_status=fee_status,
     )
     content = build_payments_pdf(rows, by_id, owners, filter_note=note)
     stamp = datetime.now(UTC).strftime("%Y%m%d")

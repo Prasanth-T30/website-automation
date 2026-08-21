@@ -503,3 +503,101 @@ def _xlsx_receipt_numbers(content: bytes) -> set[str]:
             if isinstance(cell, str) and cell.startswith("RCPT"):
                 found.add(cell)
     return found
+
+
+# ── Fee capture at approval ──────────────────────────────────────────────
+# The applicant only states what they are paying now. Without the course fee
+# being set at approval, every student enrolled already settled and nothing
+# ever appeared as outstanding on the Finance screen.
+
+
+def _approve_with_fee(client: TestClient, csrf: str, *, paid: str, total_fees) -> dict:
+    form = {
+        "name": "Fee Capture", "email": f"{_unique('cap')}@example.com",
+        "phone": "9876543210", "college": "College", "place": "Chennai",
+        "applicant_type": "student", "category": "Project", "domain": "Software Testing",
+        "duration": "30 Days", "start_date": "2026-09-01", "end_date": "2026-10-01",
+        "amount": paid, "transaction_id": _unique("TXN"), "declaration": "true",
+    }
+    files = {"payment_screenshot": ("proof.png", io.BytesIO(b"fake"), "image/png")}
+    app_id = client.post("/api/v1/public/applications", data=form, files=files).json()["id"]
+    client.post(f"/api/v1/applications/{app_id}/claim", headers={"X-CSRF-Token": csrf})
+
+    body = {"subject": "", "body": ""}
+    if total_fees is not None:
+        body["total_fees"] = total_fees
+    approved = client.post(
+        f"/api/v1/applications/{app_id}/approve", json=body, headers={"X-CSRF-Token": csrf}
+    )
+    assert approved.status_code == 200, approved.text
+    sid = approved.json()["converted_student_id"]
+    return client.get(f"/api/v1/students/{sid}").json()
+
+
+def test_approving_with_a_course_fee_leaves_a_pending_balance(client: TestClient, user_repo):
+    csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    student = _approve_with_fee(client, csrf, paid="5000", total_fees=20000)
+
+    assert student["total_fees"] == 20000
+    assert student["fees_paid"] == 5000
+    assert student["total_fees"] - student["fees_paid"] == 15000
+    assert student["payment_status"] == "partial"
+
+
+def test_approving_with_the_fee_already_covered_settles_the_student(
+    client: TestClient, user_repo
+):
+    csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    student = _approve_with_fee(client, csrf, paid="20000", total_fees=20000)
+
+    assert student["total_fees"] - student["fees_paid"] == 0
+    assert student["payment_status"] == "paid"
+
+
+def test_a_fee_below_what_was_already_paid_never_goes_negative(client: TestClient, user_repo):
+    """A typo must not create a negative balance — that would credit the
+    student against their next installment."""
+    csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    student = _approve_with_fee(client, csrf, paid="9000", total_fees=1000)
+
+    assert student["total_fees"] == 9000
+    assert student["total_fees"] - student["fees_paid"] == 0
+
+
+def test_omitting_the_fee_keeps_the_old_behaviour(client: TestClient, user_repo):
+    """Approvals from a client that does not send the field must still work."""
+    csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    student = _approve_with_fee(client, csrf, paid="7000", total_fees=None)
+
+    assert student["total_fees"] == 7000
+    assert student["total_fees"] - student["fees_paid"] == 0
+
+
+def test_the_export_can_be_narrowed_to_fully_paid_students(client: TestClient, user_repo):
+    csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    settled = _approve_with_fee(client, csrf, paid="8000", total_fees=8000)
+    owing = _approve_with_fee(client, csrf, paid="2000", total_fees=30000)
+
+    ledger = client.get("/api/v1/payments").json()
+    receipt_of = {p["student_id"]: p["receipt_number"] for p in ledger}
+
+    paid_only = _xlsx_receipt_numbers(
+        client.get("/api/v1/payments/export.xlsx", params={"fee_status": "paid"}).content
+    )
+    assert receipt_of[settled["id"]] in paid_only
+    assert receipt_of[owing["id"]] not in paid_only
+
+
+def test_the_export_can_be_narrowed_to_students_who_still_owe(client: TestClient, user_repo):
+    csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    settled = _approve_with_fee(client, csrf, paid="8000", total_fees=8000)
+    owing = _approve_with_fee(client, csrf, paid="2000", total_fees=30000)
+
+    ledger = client.get("/api/v1/payments").json()
+    receipt_of = {p["student_id"]: p["receipt_number"] for p in ledger}
+
+    pending_only = _xlsx_receipt_numbers(
+        client.get("/api/v1/payments/export.xlsx", params={"fee_status": "pending"}).content
+    )
+    assert receipt_of[owing["id"]] in pending_only
+    assert receipt_of[settled["id"]] not in pending_only

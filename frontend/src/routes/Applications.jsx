@@ -43,7 +43,15 @@ const STATUS_TONE = {
 const rejectSchema = z.object({
   reason: z.string().min(5, "Give at least a short reason.").max(1000),
 });
-const approveSchema = z.object({ subject: z.string().max(200), body: z.string() });
+const approveSchema = z.object({
+  subject: z.string().max(200),
+  body: z.string(),
+  // The applicant only tells us what they are paying now. The course fee is
+  // the HR's to state, and without it every student enrols already settled.
+  total_fees: z.coerce
+    .number({ invalid_type_error: "Enter the total course fee" })
+    .min(0, "Fee cannot be negative"),
+});
 export default function Applications() {
   const { user, isAdmin } = useAuth();
   const queryClient = useQueryClient();
@@ -307,17 +315,23 @@ export default function Applications() {
 }
 function ApproveDialog({ application, onClose, onSubmit, loading }) {
   const sendsEmail = EMAIL_ENABLED_CATEGORIES.has(application.category);
+  const paid = application.amount || 0;
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(approveSchema),
     defaultValues: {
       subject: `${application.category} Offer Letter — Dvein Innovations`,
       body: "",
+      total_fees: paid,
     },
   });
+
+  const total = Number(watch("total_fees"));
+  const pending = Number.isFinite(total) ? Math.max(0, total - paid) : 0;
   return (
     <Dialog
       open
@@ -330,6 +344,38 @@ function ApproveDialog({ application, onClose, onSubmit, loading }) {
       }
     >
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
+        {/* Fees. Approving is the moment the real course fee is known, and the
+            only chance to set it before the student reaches Finance. */}
+        <div className="rounded-lg border border-line bg-subtle p-4">
+          <Field
+            label="Total course fee"
+            error={errors.total_fees?.message}
+            hint="What this student owes in total. Their registration payment counts towards it."
+            required
+          >
+            <input
+              type="number"
+              min="0"
+              step="1"
+              autoFocus
+              className="h-10 w-full rounded-md border border-line bg-surface px-3 text-sm text-fg"
+              {...register("total_fees")}
+            />
+          </Field>
+          <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
+            <dt className="text-fg-muted">Already paid</dt>
+            <dd className="text-right font-medium tabular-nums text-fg">{money(paid)}</dd>
+            <dt className="text-fg-muted">Pending</dt>
+            <dd
+              className={`text-right font-semibold tabular-nums ${
+                pending > 0 ? "text-warn-text" : "text-success-text"
+              }`}
+            >
+              {money(pending)}
+            </dd>
+          </dl>
+        </div>
+
         {sendsEmail && (
           <>
             <Field label="Subject" error={errors.subject?.message}>

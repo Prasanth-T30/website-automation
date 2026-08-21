@@ -62,6 +62,7 @@ export default function Payments() {
   const { user, isAdmin } = useAuth();
   const [collegeFilter, setCollegeFilter] = useState("all");
   const [methodFilter, setMethodFilter] = useState("all");
+  const [feeStatusFilter, setFeeStatusFilter] = useState("all");
   const [receiptQuery, setReceiptQuery] = useState("");
   // Cross-HR revenue comparison is admin-only (the leaderboard lives on
   // /admin/hr-performance) — an HR's own ledger and stats only cover
@@ -78,6 +79,9 @@ export default function Payments() {
     [students.data],
   );
   const studentName = (id) => studentById.get(id)?.name ?? id;
+  /** What a student still owes. Negative balances are clamped: over-payment
+   *  is settled, not credit. */
+  const balanceOf = (s) => (s ? Math.max(0, s.total_fees - s.fees_paid) : 0);
 
   // A transaction carries no college of its own — it inherits the one on the
   // student it belongs to, which is what "filter the finance page by college"
@@ -94,6 +98,12 @@ export default function Payments() {
   const visibleTransactions = useMemo(() => {
     return (transactions.data ?? []).filter((t) => {
       if (methodFilter !== "all" && (t.method ?? "other") !== methodFilter) return false;
+      if (feeStatusFilter !== "all") {
+        // Fee status belongs to the student: a payment counts as "fully paid"
+        // when the student it belongs to owes nothing further.
+        const owed = balanceOf(studentById.get(t.student_id));
+        if (feeStatusFilter === "paid" ? owed > 0 : owed <= 0) return false;
+      }
       if (collegeFilter !== "all" && studentById.get(t.student_id)?.college !== collegeFilter) {
         return false;
       }
@@ -104,7 +114,7 @@ export default function Payments() {
         (studentById.get(t.student_id)?.name ?? "").toLowerCase().includes(q)
       );
     });
-  }, [transactions.data, studentById, methodFilter, collegeFilter, receiptQuery]);
+  }, [transactions.data, studentById, methodFilter, collegeFilter, receiptQuery, feeStatusFilter]);
 
   const paging = usePagination(visibleTransactions);
 
@@ -115,6 +125,7 @@ export default function Payments() {
     method: methodFilter,
     college: collegeFilter,
     q: receiptQuery,
+    fee_status: feeStatusFilter,
   };
 
   const summary = useMemo(() => {
@@ -208,6 +219,17 @@ export default function Payments() {
         </select>
 
         <select
+          value={feeStatusFilter}
+          onChange={(e) => setFeeStatusFilter(e.target.value)}
+          aria-label="Filter by fee status"
+          className={filterSelectClass}
+        >
+          <option value="all">All fee statuses</option>
+          <option value="pending">Pending balance</option>
+          <option value="paid">Fully paid</option>
+        </select>
+
+        <select
           value={methodFilter}
           onChange={(e) => setMethodFilter(e.target.value)}
           aria-label="Filter by payment method"
@@ -247,10 +269,10 @@ export default function Payments() {
 
           {visibleTransactions.length > 0 && (
             <div className="scroll-x">
-              <table className="w-full min-w-[760px] text-sm">
+              <table className="w-full min-w-[940px] text-sm">
                 <thead>
                   <tr className="border-b border-line-subtle bg-subtle/60 text-left">
-                    {["Receipt", "Student", "Amount", "Method", "Date", ""].map((h) => (
+                    {["Receipt", "Student", "Amount", "Paid", "Pending", "Method", "Date", ""].map((h) => (
                       <th
                         key={h}
                         className="px-4 py-2.5 text-xs font-bold tracking-wide text-fg-muted uppercase"
@@ -273,6 +295,26 @@ export default function Payments() {
                         </div>
                       </td>
                       <td className="px-4 py-3 font-semibold text-fg">{money(t.amount)}</td>
+                      {/* The student's overall position, not this one payment —
+                          a ledger row alone never says what is still owed. */}
+                      <td className="px-4 py-3 tabular-nums text-fg-secondary">
+                        {studentById.has(t.student_id)
+                          ? money(studentById.get(t.student_id).fees_paid)
+                          : "—"}
+                      </td>
+                      <td className="px-4 py-3 tabular-nums font-semibold">
+                        {studentById.has(t.student_id) ? (
+                          balanceOf(studentById.get(t.student_id)) > 0 ? (
+                            <span className="text-warn-text">
+                              {money(balanceOf(studentById.get(t.student_id)))}
+                            </span>
+                          ) : (
+                            <span className="text-success-text">Settled</span>
+                          )
+                        ) : (
+                          "—"
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <Badge
                           tone={t.method ? METHOD_TONE[t.method] : "neutral"}

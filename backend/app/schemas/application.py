@@ -163,6 +163,12 @@ class ApproveRequest(BaseModel):
     subject: str = Field(default="", max_length=200)
     body: str = ""
 
+    # The real course fee, which the applicant does not state on the form —
+    # what they paid at registration is usually a deposit. Left unset, the
+    # student is billed exactly what they already paid and shows as settled,
+    # which is why nothing ever appeared as outstanding in Finance.
+    total_fees: float | None = Field(default=None, ge=0)
+
 
 class RejectRequest(BaseModel):
     reason: str = Field(min_length=5, max_length=1000)

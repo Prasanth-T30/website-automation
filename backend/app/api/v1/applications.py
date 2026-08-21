@@ -96,7 +96,7 @@ def approve_application(
             status.HTTP_400_BAD_REQUEST, detail="Only a claimed application can be approved."
         )
 
-    student = students.create_from_application(app_)
+    student = students.create_from_application(app_, total_fees=data.total_fees)
     if app_.amount > 0:
         # The registration's self-reported amount is the student's first
         # installment (confirmed with the user) — give it a real receipt so

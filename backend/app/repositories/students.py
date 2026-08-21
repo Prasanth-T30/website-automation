@@ -41,12 +41,26 @@ class StudentRepository:
         epoch = datetime.min.replace(tzinfo=UTC)
         return sorted(docs, key=lambda s: s.created_at or epoch, reverse=True)
 
-    def create_from_application(self, application: Application) -> Student:
+    def create_from_application(
+        self, application: Application, *, total_fees: float | None = None
+    ) -> Student:
         """The registration's self-reported amount counts as the first paid
         installment — confirmed with the user rather than starting the ledger
-        at zero and re-collecting it."""
+        at zero and re-collecting it.
+
+        `total_fees` is the real course fee, stated by the HR at approval.
+        The applicant never provides it: the form only captures what they are
+        paying now, which is usually a deposit. Falling back to the paid
+        amount bills them exactly what they have already handed over, so the
+        student reads as settled and never appears as outstanding.
+        """
         ref = self._db.collection(STUDENTS).document()
         now = datetime.now(UTC)
+        # Never bill less than what they have already paid — that would show a
+        # negative balance and let the capping rule credit them on the next
+        # installment.
+        billed = max(total_fees if total_fees is not None else application.amount,
+                     application.amount)
         data = {
             "application_id": application.id,
             "owner_id": application.owner_id,
@@ -59,9 +73,9 @@ class StudentRepository:
             "domain": application.domain,
             "duration": application.duration,
             "batch_id": None,
-            "total_fees": application.amount,
+            "total_fees": billed,
             "fees_paid": application.amount,
-            "payment_status": "paid",
+            "payment_status": "paid" if application.amount >= billed else "partial",
             "status": "active",
             "created_at": now,
             "updated_at": now,
