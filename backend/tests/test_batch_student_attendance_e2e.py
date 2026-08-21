@@ -48,6 +48,17 @@ def _login_as(client: TestClient, user_repo: UserRepository, *, role: UserRole) 
     return client.cookies["dvein_csrf"]
 
 
+def _relogin(client: TestClient, email: str) -> str:
+    """Sign back in as an account `_login_as` already created."""
+    res = client.post("/api/v1/auth/login", json={"email": email, "password": "a-real-password-1"})
+    assert res.status_code == 200, res.text
+    return client.cookies["dvein_csrf"]
+
+
+def _my_email(client: TestClient) -> str:
+    return client.get("/api/v1/auth/me").json()["email"]
+
+
 def _create_approved_student(client: TestClient, csrf: str) -> str:
     """Submits, claims, approves a Project registration and returns the
     resulting student's id."""
@@ -452,22 +463,31 @@ def test_a_full_batch_refuses_another_student(client: TestClient, user_repo):
 def test_a_seat_taken_by_another_hr_still_counts_against_capacity(
     client: TestClient, user_repo
 ):
-    """The batch is shared, so a colleague's student occupies a real seat."""
+    """The batch is shared, so a colleague's student occupies a real seat.
+
+    Only an admin can place one there — an HR cannot add to someone else's
+    batch at all — but once placed, that seat is gone for everyone.
+    """
     csrf_a = _login_as(client, user_repo, role=UserRole.hr)
+    a_email = _my_email(client)
     batch = _make_batch(client, csrf_a, capacity=1)
-    a_student = _manual_student(client, csrf_a, "HR A Student")
-    client.patch(
-        f"/api/v1/students/{a_student}",
+
+    admin_csrf = _login_as(client, user_repo, role=UserRole.admin)
+    theirs = _manual_student(client, admin_csrf, "Admin Places This One")
+    assert client.patch(
+        f"/api/v1/students/{theirs}",
+        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": admin_csrf},
+    ).status_code == 200
+
+    # The creator now finds their own batch full.
+    csrf_a = _relogin(client, a_email)
+    mine = _manual_student(client, csrf_a, "No Room Left")
+    res = client.patch(
+        f"/api/v1/students/{mine}",
         json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf_a},
     )
-
-    csrf_b = _login_as(client, user_repo, role=UserRole.hr)
-    b_student = _manual_student(client, csrf_b, "HR B Student")
-    res = client.patch(
-        f"/api/v1/students/{b_student}",
-        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf_b},
-    )
-    assert res.status_code == 400, "a colleague's seat was not counted"
+    assert res.status_code == 400, res.text
+    assert "full" in res.json()["detail"].lower()
 
 
 def test_freeing_a_seat_lets_the_next_student_in(client: TestClient, user_repo):
@@ -496,25 +516,172 @@ def test_assigning_to_a_batch_that_does_not_exist_is_refused(client: TestClient,
     assert res.status_code == 404
 
 
-def test_an_hr_sees_only_their_own_students_on_a_shared_batch_roster(
+def test_the_students_list_stays_scoped_even_when_filtered_by_batch(
     client: TestClient, user_repo
 ):
+    """`/students` is the private view and stays private. The shared cohort
+    lives on `/batches/{id}/roster`, which is a different question."""
     csrf_a = _login_as(client, user_repo, role=UserRole.hr)
     batch = _make_batch(client, csrf_a, capacity=10)
     a_student = _manual_student(client, csrf_a, "Belongs To A")
     client.patch(f"/api/v1/students/{a_student}",
                  json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf_a})
 
-    csrf_b = _login_as(client, user_repo, role=UserRole.hr)
-    b_student = _manual_student(client, csrf_b, "Belongs To B")
-    client.patch(f"/api/v1/students/{b_student}",
-                 json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf_b})
-
+    _login_as(client, user_repo, role=UserRole.hr)
     seen = {s["id"] for s in client.get(
         "/api/v1/students", params={"batch_id": batch["id"]}).json()}
-    assert b_student in seen
-    assert a_student not in seen, "a colleague's student appeared on the roster"
+    assert a_student not in seen
 
-    # The seat count stays honest for everyone, though — it is shared capacity.
+    # But the seat count stays honest — it is shared capacity.
     card = next(b for b in client.get("/api/v1/batches").json() if b["id"] == batch["id"])
-    assert card["student_count"] == 2
+    assert card["student_count"] == 1
+
+
+# ── Batch ownership: shared to see, creator's to fill ────────────────────
+
+
+def test_only_the_batch_creator_can_add_students_to_it(client: TestClient, user_repo):
+    csrf_a = _login_as(client, user_repo, role=UserRole.hr)
+    batch = _make_batch(client, csrf_a, capacity=10)
+
+    csrf_b = _login_as(client, user_repo, role=UserRole.hr)
+    theirs = _manual_student(client, csrf_b, "Not Yours To Place")
+    res = client.patch(
+        f"/api/v1/students/{theirs}",
+        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf_b},
+    )
+    assert res.status_code == 403, res.text
+    assert "created" in res.json()["detail"].lower()
+
+
+def test_an_admin_can_add_students_to_anyones_batch(client: TestClient, user_repo):
+    csrf_a = _login_as(client, user_repo, role=UserRole.hr)
+    batch = _make_batch(client, csrf_a, capacity=10)
+
+    admin_csrf = _login_as(client, user_repo, role=UserRole.admin)
+    sid = _manual_student(client, admin_csrf, "Placed By Admin")
+    res = client.patch(
+        f"/api/v1/students/{sid}",
+        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert res.status_code == 200, res.text
+
+
+def test_a_students_own_hr_can_always_withdraw_them(client: TestClient, user_repo):
+    """Nobody's student gets stranded in a cohort only someone else can touch."""
+    csrf_a = _login_as(client, user_repo, role=UserRole.hr)
+    batch = _make_batch(client, csrf_a, capacity=10)
+
+    csrf_b = _login_as(client, user_repo, role=UserRole.hr)
+    b_email = _my_email(client)
+    b_student = _manual_student(client, csrf_b, "Belongs To B")
+
+    # Admin puts B's student into A's batch — B could not have done it.
+    admin_csrf = _login_as(client, user_repo, role=UserRole.admin)
+    assert client.patch(
+        f"/api/v1/students/{b_student}",
+        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": admin_csrf},
+    ).status_code == 200
+
+    # B still owns them, so B can pull them back out.
+    csrf_b = _relogin(client, b_email)
+    res = client.patch(
+        f"/api/v1/students/{b_student}",
+        json={"batch_id": None}, headers={"X-CSRF-Token": csrf_b},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["batch_id"] is None
+
+
+def test_the_roster_shows_everyone_but_hides_other_hrs_money(client: TestClient, user_repo):
+    csrf_a = _login_as(client, user_repo, role=UserRole.hr)
+    batch = _make_batch(client, csrf_a, capacity=10)
+    a_student = _manual_student(client, csrf_a, "Belongs To A")
+    client.patch(f"/api/v1/students/{a_student}",
+                 json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf_a})
+
+    _login_as(client, user_repo, role=UserRole.hr)
+    roster = client.get(f"/api/v1/batches/{batch['id']}/roster").json()
+
+    entry = next(r for r in roster if r["id"] == a_student)
+    assert entry["name"] == "Belongs To A", "the cohort must be visible to the whole team"
+    assert entry["is_mine"] is False
+    # The figures must not reach this browser at all.
+    assert entry["total_fees"] is None
+    assert entry["fees_paid"] is None
+    assert entry["balance"] is None
+    assert entry["payment_status"] is None
+
+
+def test_the_roster_still_shows_your_own_students_money(client: TestClient, user_repo):
+    csrf = _login_as(client, user_repo, role=UserRole.hr)
+    batch = _make_batch(client, csrf, capacity=10)
+    sid = _manual_student(client, csrf, "Mine To See")
+    client.patch(f"/api/v1/students/{sid}",
+                 json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf})
+
+    entry = next(
+        r for r in client.get(f"/api/v1/batches/{batch['id']}/roster").json() if r["id"] == sid
+    )
+    assert entry["is_mine"] is True
+    assert entry["total_fees"] == 10000
+    assert entry["balance"] == 10000
+
+
+def test_batch_finance_counts_only_what_the_caller_may_see(client: TestClient, user_repo):
+    csrf_a = _login_as(client, user_repo, role=UserRole.hr)
+    batch = _make_batch(client, csrf_a, capacity=10)
+    a_student = _manual_student(client, csrf_a, "A Pays")
+    client.patch(f"/api/v1/students/{a_student}",
+                 json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf_a})
+
+    admin_csrf = _login_as(client, user_repo, role=UserRole.admin)
+    b_student = _manual_student(client, admin_csrf, "Admin's Own")
+    client.patch(f"/api/v1/students/{b_student}",
+                 json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": admin_csrf})
+
+    admin_view = client.get(f"/api/v1/batches/{batch['id']}/finance").json()
+    assert admin_view["total_students"] == 2
+    assert admin_view["counted_students"] == 2
+
+    # Back to a fresh HR: they see the cohort size but count nobody's money.
+    _login_as(client, user_repo, role=UserRole.hr)
+    hr_view = client.get(f"/api/v1/batches/{batch['id']}/finance").json()
+    assert hr_view["total_students"] == 2, "cohort size is shared"
+    assert hr_view["counted_students"] == 0, "but none of the money is theirs"
+    assert hr_view["collected"] == 0
+    assert hr_view["remaining"] == 0
+
+
+def test_any_hr_can_place_students_into_an_admin_created_batch(
+    client: TestClient, user_repo
+):
+    """An admin-created batch is an institute cohort, not one person's.
+
+    Gating it to the admin alone would leave an institute that sets its
+    batches up centrally with every HR unable to place a single student.
+    """
+    admin_csrf = _login_as(client, user_repo, role=UserRole.admin)
+    batch = _make_batch(client, admin_csrf, capacity=10)
+
+    csrf = _login_as(client, user_repo, role=UserRole.hr)
+    sid = _manual_student(client, csrf, "Joins The Institute Batch")
+    res = client.patch(
+        f"/api/v1/students/{sid}",
+        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf},
+    )
+    assert res.status_code == 200, res.text
+
+
+def test_an_hrs_own_batch_stays_closed_to_their_colleagues(client: TestClient, user_repo):
+    """The admin exception must not leak into HR-created batches."""
+    csrf_a = _login_as(client, user_repo, role=UserRole.hr)
+    batch = _make_batch(client, csrf_a, capacity=10)
+
+    csrf_b = _login_as(client, user_repo, role=UserRole.hr)
+    sid = _manual_student(client, csrf_b, "Kept Out")
+    res = client.patch(
+        f"/api/v1/students/{sid}",
+        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf_b},
+    )
+    assert res.status_code == 403

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 
+from app.models.announcement import Announcement
 from app.models.batch import Batch
 from app.models.student import Student
 from app.schemas.notification import NotificationOut
@@ -35,13 +36,35 @@ BATCH_STARTING_SOON_DAYS = 7
 
 
 def build_notifications(
-    batches: list[Batch], all_students: list[Student], *, owner_id: str | None
+    batches: list[Batch],
+    all_students: list[Student],
+    *,
+    owner_id: str | None,
+    announcements: list[Announcement] | None = None,
 ) -> list[NotificationOut]:
     """`owner_id=None` (admin) sees every student's alerts; otherwise only
     the caller's own. Batch-expiry items are always institute-wide — batches
-    aren't owned per-HR anywhere else in this app either."""
+    aren't owned per-HR anywhere else in this app either.
+
+    Announcements go to everyone unchanged: an admin posts one precisely so
+    that every HR sees the same words.
+    """
     today = date.today()
     items: list[NotificationOut] = []
+
+    # Urgency 0 — above every derived alert. Someone chose to say this, which
+    # outranks anything the system inferred on its own.
+    for a in announcements or []:
+        items.append(
+            NotificationOut(
+                id=f"announcement-{a.id}",
+                type=a.level if a.level in ("danger", "warning", "primary") else "primary",
+                title=a.title,
+                description=a.body,
+                urgency=0,
+                created_at=a.created_at,
+            )
+        )
 
     for b in batches:
         if b.status != "active":

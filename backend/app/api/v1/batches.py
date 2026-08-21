@@ -18,13 +18,20 @@ from app.api.deps import (
     ActivityRepo,
     BatchRepo,
     CurrentUser,
+    PaymentRepo,
     StudentRepo,
     UserRepo,
 )
 from app.models.batch import Batch
 from app.models.user import User, UserRole
 from app.repositories.batches import DuplicateBatchCode
-from app.schemas.batch import BatchCreate, BatchOut, BatchUpdate
+from app.schemas.batch import (
+    BatchCreate,
+    BatchFinance,
+    BatchOut,
+    BatchRosterEntry,
+    BatchUpdate,
+)
 from app.services import activity
 
 router = APIRouter(prefix="/batches", tags=["Batches"])
@@ -190,4 +197,82 @@ def delete_batch(
         entity_type="batch",
         entity_id=batch_id,
         summary=f"Deleted batch {batch.code} ({unassigned} students unassigned)",
+    )
+
+
+@router.get("/{batch_id}/roster", response_model=list[BatchRosterEntry])
+def batch_roster(
+    batch_id: str,
+    batches: BatchRepo,
+    students: StudentRepo,
+    users: UserRepo,
+    user: CurrentUser,
+) -> list[BatchRosterEntry]:
+    """Everyone on this batch, with fees only for the ones you own.
+
+    The batch itself is shared, so who is sitting in it is shared too — an HR
+    needs the real roster to know whether a cohort is viable and who they are
+    teaching. What each of those people paid is not shared, so the fee fields
+    come back null for a colleague's student rather than being blanked out in
+    the browser.
+    """
+    if batches.get(batch_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Batch not found.")
+
+    is_admin = user.role is UserRole.admin
+    names = {u.id: u.full_name for u in users.list_all()}
+    rows: list[BatchRosterEntry] = []
+    for s in students.list_all(batch_id=batch_id):
+        mine = is_admin or s.owner_id == user.id
+        rows.append(
+            BatchRosterEntry(
+                id=s.id,
+                name=s.name,
+                domain=s.domain,
+                status=s.status,
+                is_mine=s.owner_id == user.id,
+                owner_name=names.get(s.owner_id or "") if is_admin else None,
+                total_fees=s.total_fees if mine else None,
+                fees_paid=s.fees_paid if mine else None,
+                balance=max(0.0, s.total_fees - s.fees_paid) if mine else None,
+                payment_status=s.payment_status if mine else None,
+            )
+        )
+    return sorted(rows, key=lambda r: r.name.lower())
+
+
+@router.get("/{batch_id}/finance", response_model=BatchFinance)
+def batch_finance(
+    batch_id: str,
+    batches: BatchRepo,
+    students: StudentRepo,
+    payments: PaymentRepo,
+    user: CurrentUser,
+) -> BatchFinance:
+    """What this batch is worth — to you, or to the institute if you are admin.
+
+    `counted_students` versus `total_students` is what keeps the figures
+    honest: an HR sees money for their own three students in a cohort of
+    twelve, and the screen can say so rather than implying the batch only
+    ever earned that much.
+    """
+    if batches.get(batch_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Batch not found.")
+
+    seated = students.list_all(batch_id=batch_id)
+    is_admin = user.role is UserRole.admin
+    counted = seated if is_admin else [s for s in seated if s.owner_id == user.id]
+    ids = {s.id for s in counted}
+
+    collected = sum(
+        p.amount for p in payments.list_all() if p.student_id in ids
+    )
+    balances = [max(0.0, s.total_fees - s.fees_paid) for s in counted]
+    return BatchFinance(
+        collected=collected,
+        remaining=sum(balances),
+        settled_count=sum(1 for b in balances if b <= 0),
+        owing_count=sum(1 for b in balances if b > 0),
+        counted_students=len(counted),
+        total_students=len(seated),
     )

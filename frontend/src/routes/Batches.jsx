@@ -19,8 +19,8 @@ import { batchesApi } from "@/features/batches/api";
 import { publicApi } from "@/features/public/api";
 import { studentsApi } from "@/features/students/api";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { paymentsApi } from "@/features/payments/api";
 import { ApiError } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import { money, shortDate } from "@/lib/format";
 const BATCHES_KEY = ["batches"];
 const TONE = {
@@ -37,6 +37,7 @@ const createSchema = z.object({
   notes: z.string().optional(),
 });
 export default function Batches() {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -97,10 +98,18 @@ export default function Batches() {
 
         {batches.data && batches.data.length > 0 && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {batches.data.map((b) => (
+            {batches.data.map((b) => {
+              // Authorship, not can_edit: an admin can edit every batch, so
+              // keying the highlight off permission would light up the whole
+              // page for them and mark nothing out.
+              const mine = b.created_by_id && b.created_by_id === user?.id;
+              return (
               <Card
                 key={b.id}
-                className="cursor-pointer transition-shadow hover:shadow-e2"
+                className={cn(
+                  "cursor-pointer transition-shadow hover:shadow-e2",
+                  mine && "ring-2 ring-brand/45",
+                )}
                 onClick={() => setSelected(b)}
               >
                 <CardBody className="flex flex-col gap-3">
@@ -109,9 +118,12 @@ export default function Batches() {
                       <p className="text-sm font-bold text-fg">{b.code}</p>
                       <p className="text-xs text-fg-muted">{b.domain}</p>
                     </div>
-                    <Badge tone={TONE[b.status]} className="capitalize">
-                      {b.status}
-                    </Badge>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      {mine && <Badge tone="brand">Yours</Badge>}
+                      <Badge tone={TONE[b.status]} className="capitalize">
+                        {b.status}
+                      </Badge>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-1.5 text-xs text-fg-secondary">
@@ -143,7 +155,11 @@ export default function Batches() {
                     HR who owns it — only they and an admin can change it. */}
                   <div className="flex items-center justify-between gap-2 border-t border-line-subtle pt-2.5">
                     <span className="truncate text-[11px] text-fg-muted">
-                      {b.created_by_name ? `Created by ${b.created_by_name}` : "Created by —"}
+                      {mine
+                        ? "Created by you"
+                        : b.created_by_name
+                          ? `Created by ${b.created_by_name}`
+                          : "Created by —"}
                     </span>
                     {!b.can_edit && (
                       <span className="shrink-0 text-[10px] font-bold tracking-wide text-fg-muted uppercase">
@@ -153,7 +169,8 @@ export default function Batches() {
                   </div>
                 </CardBody>
               </Card>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -226,36 +243,30 @@ function BatchRoster({ batch }) {
   const { isAdmin } = useAuth();
   const [addOpen, setAddOpen] = useState(false);
 
-  // Both lists come back already scoped by the API — an HR sees their own
-  // students and their own payments, an admin sees everyone's. Every figure
-  // below is therefore "yours" for an HR and "the batch's" for an admin,
-  // the same rule the rest of the console follows.
+  // The roster is everyone in the cohort — the batch is shared, so who is in
+  // it is shared too. Fee fields arrive null for other HRs' students, so the
+  // amounts never reach this browser at all rather than being hidden here.
   const roster = useQuery({
-    queryKey: ["students", { batch_id: batch.id }],
-    queryFn: () => studentsApi.list({ batch_id: batch.id }),
+    queryKey: ["batches", batch.id, "roster"],
+    queryFn: () => batchesApi.roster(batch.id),
   });
-  const allStudents = useQuery({ queryKey: ["students"], queryFn: () => studentsApi.list() });
-  const payments = useQuery({ queryKey: ["payments"], queryFn: () => paymentsApi.list() });
+  const finance = useQuery({
+    queryKey: ["batches", batch.id, "finance"],
+    queryFn: () => batchesApi.finance(batch.id),
+  });
+  const allStudents = useQuery({
+    queryKey: ["students"],
+    queryFn: () => studentsApi.list(),
+    enabled: batch.can_edit,
+  });
 
   const rows = roster.data ?? [];
-  const inBatch = new Set(rows.map((s) => s.id));
-  const balance = (s) => Math.max(0, s.total_fees - s.fees_paid);
-
-  const finance = {
-    settled: rows.filter((s) => balance(s) <= 0).length,
-    owing: rows.filter((s) => balance(s) > 0).length,
-    remaining: rows.reduce((sum, s) => sum + balance(s), 0),
-    // Money actually collected, read from the ledger rather than summing
-    // fees_paid — the ledger is what receipts were issued against.
-    generated: (payments.data ?? [])
-      .filter((p) => inBatch.has(p.student_id))
-      .reduce((sum, p) => sum + p.amount, 0),
-  };
+  const f = finance.data;
 
   const refresh = async () => {
     await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["batches"] }),
       queryClient.invalidateQueries({ queryKey: ["students"] }),
-      queryClient.invalidateQueries({ queryKey: BATCHES_KEY }),
     ]);
   };
 
@@ -278,10 +289,9 @@ function BatchRoster({ batch }) {
       toast.error(err instanceof ApiError ? err.detail : "Could not remove that student."),
   });
 
-  // Only students you can actually place: yours, and not already in a batch.
   const assignable = (allStudents.data ?? []).filter((s) => !s.batch_id);
   const full = batch.capacity > 0 && batch.student_count >= batch.capacity;
-  const othersHere = batch.student_count - rows.length;
+  const balanceOf = (s) => Math.max(0, s.total_fees - s.fees_paid);
 
   return (
     <div className="flex flex-col gap-5 p-5">
@@ -298,11 +308,25 @@ function BatchRoster({ batch }) {
               <p className="mt-0.5 text-sm text-fg capitalize">{value}</p>
             </div>
           ))}
+          <div className="col-span-2 border-t border-line-subtle pt-3">
+            <p className="text-[10px] font-bold tracking-wide text-fg-muted uppercase">
+              Created by
+            </p>
+            <p className="mt-0.5 text-sm text-fg">
+              {batch.created_by_name ?? "—"}
+              {batch.can_edit && (
+                <span className="ml-2 text-xs font-semibold text-[var(--brand-text)]">
+                  You can edit this
+                </span>
+              )}
+            </p>
+          </div>
         </CardBody>
       </Card>
 
-      {/* Batch finances. For an HR this is their own share — the batch is
-          shared, the revenue is not — so the heading says whose. */}
+      {/* Money. An HR's figures cover their own students only, so the panel
+          says how many of the cohort they describe rather than letting the
+          number read as the whole batch's takings. */}
       <Card>
         <CardBody className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
@@ -312,35 +336,50 @@ function BatchRoster({ batch }) {
             </h3>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-md border border-line-subtle bg-subtle p-3">
-              <p className="text-[10px] font-bold tracking-wide text-fg-muted uppercase">
-                Collected
-              </p>
-              <p className="mt-0.5 text-lg font-extrabold tabular-nums text-success-text">
-                {money(finance.generated)}
-              </p>
-            </div>
-            <div className="rounded-md border border-line-subtle bg-subtle p-3">
-              <p className="text-[10px] font-bold tracking-wide text-fg-muted uppercase">
-                Remaining
-              </p>
-              <p
-                className={`mt-0.5 text-lg font-extrabold tabular-nums ${
-                  finance.remaining > 0 ? "text-warn-text" : "text-success-text"
-                }`}
-              >
-                {money(finance.remaining)}
-              </p>
-            </div>
-          </div>
+          {finance.isPending && <LoadingState label="Loading figures…" />}
 
-          <dl className="grid grid-cols-2 gap-2 text-sm">
-            <dt className="text-fg-muted">Fully paid</dt>
-            <dd className="text-right font-semibold tabular-nums text-fg">{finance.settled}</dd>
-            <dt className="text-fg-muted">Still owing</dt>
-            <dd className="text-right font-semibold tabular-nums text-fg">{finance.owing}</dd>
-          </dl>
+          {f && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-md border border-line-subtle bg-subtle p-3">
+                  <p className="text-[10px] font-bold tracking-wide text-fg-muted uppercase">
+                    Collected
+                  </p>
+                  <p className="mt-0.5 text-lg font-extrabold tabular-nums text-success-text">
+                    {money(f.collected)}
+                  </p>
+                </div>
+                <div className="rounded-md border border-line-subtle bg-subtle p-3">
+                  <p className="text-[10px] font-bold tracking-wide text-fg-muted uppercase">
+                    Remaining
+                  </p>
+                  <p
+                    className={`mt-0.5 text-lg font-extrabold tabular-nums ${
+                      f.remaining > 0 ? "text-warn-text" : "text-success-text"
+                    }`}
+                  >
+                    {money(f.remaining)}
+                  </p>
+                </div>
+              </div>
+
+              <dl className="grid grid-cols-2 gap-2 text-sm">
+                <dt className="text-fg-muted">Fully paid</dt>
+                <dd className="text-right font-semibold tabular-nums text-fg">
+                  {f.settled_count}
+                </dd>
+                <dt className="text-fg-muted">Still owing</dt>
+                <dd className="text-right font-semibold tabular-nums text-fg">{f.owing_count}</dd>
+              </dl>
+
+              {f.counted_students !== f.total_students && (
+                <p className="text-xs text-fg-muted">
+                  Covers {f.counted_students} of {f.total_students} students — the rest belong to
+                  other HRs.
+                </p>
+              )}
+            </>
+          )}
         </CardBody>
       </Card>
 
@@ -350,28 +389,24 @@ function BatchRoster({ batch }) {
           <h3 className="text-xs font-bold tracking-wide text-fg-muted uppercase">
             Roster {roster.data ? `(${rows.length})` : ""}
           </h3>
-          <Button
-            size="sm"
-            variant="secondary"
-            className="ml-auto"
-            onClick={() => setAddOpen(true)}
-            disabled={full}
-            title={full ? "This batch is full." : undefined}
-          >
-            <UserPlus className="size-3.5" aria-hidden /> Add
-          </Button>
+          {/* Only the person who set the batch up decides who sits in it. */}
+          {batch.can_edit && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className="ml-auto"
+              onClick={() => setAddOpen(true)}
+              disabled={full}
+              title={full ? "This batch is full." : undefined}
+            >
+              <UserPlus className="size-3.5" aria-hidden /> Add
+            </Button>
+          )}
         </div>
 
-        {full && (
+        {full && batch.can_edit && (
           <p className="mb-2 text-xs text-warn-text">
             Full at {batch.student_count} of {batch.capacity}. Remove someone to free a seat.
-          </p>
-        )}
-        {/* An HR's roster shows only their own students, so without this the
-            seat count above would look wrong to them. */}
-        {!isAdmin && othersHere > 0 && (
-          <p className="mb-2 text-xs text-fg-muted">
-            {othersHere} more {othersHere === 1 ? "seat is" : "seats are"} taken by other HRs.
           </p>
         )}
 
@@ -384,36 +419,53 @@ function BatchRoster({ batch }) {
                 <Avatar name={s.name} size="sm" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-fg">{s.name}</p>
-                  <p className="text-xs text-fg-muted">
-                    {balance(s) > 0 ? `${money(balance(s))} pending` : "Settled"}
+                  <p className="truncate text-xs text-fg-muted">
+                    {/* Fees only for your own; a colleague's student shows
+                        their programme instead of a blanked-out figure. */}
+                    {s.balance === null || s.balance === undefined
+                      ? (s.owner_name ?? s.domain ?? "—")
+                      : s.balance > 0
+                        ? `${money(s.balance)} pending`
+                        : "Settled"}
                   </p>
                 </div>
-                <Badge
-                  tone={
-                    s.payment_status === "paid"
-                      ? "success"
-                      : s.payment_status === "overdue"
-                        ? "danger"
-                        : "warn"
-                  }
-                >
-                  {s.payment_status}
-                </Badge>
-                <button
-                  type="button"
-                  onClick={() => unassign.mutate(s.id)}
-                  disabled={unassign.isPending}
-                  aria-label={`Remove ${s.name} from ${batch.code}`}
-                  className="rounded p-1 text-fg-muted transition-colors hover:bg-danger-subtle hover:text-danger"
-                >
-                  <UserMinus className="size-4" aria-hidden />
-                </button>
+                {s.payment_status && (
+                  <Badge
+                    tone={
+                      s.payment_status === "paid"
+                        ? "success"
+                        : s.payment_status === "overdue"
+                          ? "danger"
+                          : "warn"
+                    }
+                  >
+                    {s.payment_status}
+                  </Badge>
+                )}
+                {(batch.can_edit || s.is_mine) && (
+                  <button
+                    type="button"
+                    onClick={() => unassign.mutate(s.id)}
+                    disabled={unassign.isPending}
+                    aria-label={`Remove ${s.name} from ${batch.code}`}
+                    className="rounded p-1 text-fg-muted transition-colors hover:bg-danger-subtle hover:text-danger"
+                  >
+                    <UserMinus className="size-4" aria-hidden />
+                  </button>
+                )}
               </li>
             ))}
             {rows.length === 0 && (
               <li className="px-3 py-6 text-center text-xs text-fg-muted">No students yet.</li>
             )}
           </ul>
+        )}
+
+        {!batch.can_edit && (
+          <p className="mt-2 text-xs text-fg-muted">
+            {batch.created_by_name ?? "Another HR"} set this batch up. Only they or an admin can
+            change who is in it.
+          </p>
         )}
       </div>
 
@@ -422,7 +474,7 @@ function BatchRoster({ batch }) {
           open
           onOpenChange={(o) => !o && setAddOpen(false)}
           title={`Add to ${batch.code}`}
-          description="Only your own students who are not already in a batch."
+          description="Your students who are not already in a batch."
         >
           <div className="flex max-h-80 flex-col gap-1 overflow-y-auto">
             {assignable.length === 0 && (
@@ -444,7 +496,8 @@ function BatchRoster({ batch }) {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-fg">{s.name}</p>
                   <p className="truncate text-xs text-fg-muted">
-                    {s.domain} · {balance(s) > 0 ? `${money(balance(s))} pending` : "settled"}
+                    {s.domain} ·{" "}
+                    {balanceOf(s) > 0 ? `${money(balanceOf(s))} pending` : "settled"}
                   </p>
                 </div>
                 <UserPlus className="size-4 text-fg-muted" aria-hidden />

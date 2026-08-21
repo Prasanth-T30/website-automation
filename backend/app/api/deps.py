@@ -11,6 +11,7 @@ from app.core.firebase import get_bucket, get_firestore
 from app.core.security import TokenError, decode_token
 from app.models.user import User, UserRole
 from app.repositories.activity import ActivityRepository
+from app.repositories.announcements import AnnouncementRepository
 from app.repositories.applications import ApplicationRepository
 from app.repositories.attendance import AttendanceRepository
 from app.repositories.batches import BatchRepository
@@ -28,6 +29,10 @@ def get_user_repo() -> UserRepository:
 
 def get_activity_repo() -> ActivityRepository:
     return ActivityRepository(get_firestore())
+
+
+def get_announcement_repo() -> AnnouncementRepository:
+    return AnnouncementRepository(get_firestore())
 
 
 def get_application_repo() -> ApplicationRepository:
@@ -64,6 +69,7 @@ def get_storage_service() -> StorageService:
 
 UserRepo = Annotated[UserRepository, Depends(get_user_repo)]
 ActivityRepo = Annotated[ActivityRepository, Depends(get_activity_repo)]
+AnnouncementRepo = Annotated[AnnouncementRepository, Depends(get_announcement_repo)]
 ApplicationRepo = Annotated[ApplicationRepository, Depends(get_application_repo)]
 StudentRepo = Annotated[StudentRepository, Depends(get_student_repo)]
 BatchRepo = Annotated[BatchRepository, Depends(get_batch_repo)]

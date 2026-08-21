@@ -151,6 +151,7 @@ def update_student(
     data: StudentUpdate,
     students: StudentRepo,
     batches: BatchRepo,
+    users: UserRepo,
     user: CurrentUser,
 ) -> StudentOut:
     s = _get_or_404(students, student_id)
@@ -168,6 +169,33 @@ def update_student(
         batch = batches.get(new_batch_id)
         if batch is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="That batch does not exist.")
+        # A batch belongs to whoever set it up: they picked the domain, the
+        # dates and the size, so who fills the seats is theirs to decide.
+        # Everyone else can see the cohort without being able to put people
+        # in it.
+        #
+        # An admin-created batch is the exception, and deliberately so: it is
+        # an institute-wide cohort rather than one HR's, and gating it to the
+        # admin alone would mean an institute that sets its batches up
+        # centrally leaves every HR unable to place a single student.
+        creator = batch.created_by_id
+        creator_is_admin = bool(creator) and (
+            (owner := users.get(creator)) is not None and owner.role is UserRole.admin
+        )
+        may_place = (
+            user.role is UserRole.admin
+            or creator == user.id
+            or creator_is_admin
+            or creator is None
+        )
+        if not may_place:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"Only the HR who created batch {batch.code}, or an administrator, "
+                    "can add students to it."
+                ),
+            )
         occupied = len(students.list_all(batch_id=new_batch_id))
         if batch.capacity and occupied >= batch.capacity:
             raise HTTPException(
@@ -187,6 +215,22 @@ def update_student(
                 f"The total fee cannot be set below that."
             ),
         )
+
+    # Taking a student *out* is deliberately looser than putting one in: the
+    # student's own HR can always withdraw them, so nobody's student can be
+    # stranded in a cohort only somebody else is allowed to touch.
+    if "batch_id" in changes and not new_batch_id and s.batch_id:
+        leaving = batches.get(s.batch_id)
+        may_remove = (
+            user.role is UserRole.admin
+            or s.owner_id == user.id
+            or (leaving is not None and leaving.created_by_id == user.id)
+        )
+        if not may_remove:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                detail="Only this student's HR, the batch creator, or an admin can remove them.",
+            )
 
     updated = students.update(student_id, changes)
     return StudentOut.model_validate(updated)
