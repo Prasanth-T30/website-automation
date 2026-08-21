@@ -1,0 +1,29 @@
+# Without this, `COPY . .` ships the local virtualenv into the image — a few
+# hundred megabytes of Windows-built binaries that would shadow the Linux
+# packages installed in the layer above and break the container outright.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Never bake secrets into an image. Cloud Run supplies configuration through
+# environment variables and Secret Manager at run time.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+serviceAccount*.json
+firebase-adminsdk*.json
+
+# Test and tooling artifacts have no place in a runtime image.
+tests/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local scratch
+var/
+*.log
