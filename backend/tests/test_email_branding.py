@@ -98,9 +98,19 @@ def test_the_html_and_the_image_share_a_related_part(monkeypatch):
     related = [p for p in msg.walk() if p.get_content_type() == "multipart/related"]
     assert related, "no related part, so the cid reference cannot resolve"
 
+    # The HTML sits one level deeper now, inside the alternative that also
+    # carries the plain-text version. A cid reference resolves against any
+    # image in the *enclosing* related part, so the nesting is fine — but the
+    # image must stay a direct child of it, not drift inside the alternative.
     inside = {p.get_content_type() for p in related[0].get_payload()}
-    assert "text/html" in inside
     assert "image/png" in inside
+    assert "multipart/alternative" in inside
+
+    alternative = next(
+        p for p in related[0].get_payload()
+        if p.get_content_type() == "multipart/alternative"
+    )
+    assert "text/html" in {p.get_content_type() for p in alternative.get_payload()}
 
 
 def test_a_missing_logo_file_does_not_stop_the_email(monkeypatch, tmp_path):
@@ -109,3 +119,47 @@ def test_a_missing_logo_file_does_not_stop_the_email(monkeypatch, tmp_path):
     msg = _build(monkeypatch)
     assert not [p for p in msg.walk() if p.get_content_type() == "image/png"]
     assert [p for p in msg.walk() if p.get_content_type() == "application/pdf"]
+
+
+def test_the_html_part_is_encoded_so_no_line_can_be_too_long(monkeypatch):
+    """RFC 5321 caps a line at 1000 characters. This template's inline CSS
+    runs well past that, and an unencoded us-ascii part is sent verbatim — a
+    strict relay rejects the message outright with "Line too long", which is
+    exactly what a local SMTP server did."""
+    msg = _build(monkeypatch)
+    html = next(p for p in msg.walk() if p.get_content_type() == "text/html")
+    assert html.get("Content-Transfer-Encoding") in {"base64", "quoted-printable"}
+
+    for line in msg.as_string().splitlines():
+        assert len(line) < 998, f"line of {len(line)} chars would be rejected"
+
+
+def test_a_plain_text_alternative_is_included(monkeypatch):
+    """HTML-only mail scores worse with spam filters and is unreadable in
+    clients that refuse HTML."""
+    msg = _build(monkeypatch)
+    plain = [p for p in msg.walk() if p.get_content_type() == "text/plain"]
+    assert len(plain) == 1
+
+    body = plain[0].get_payload(decode=True).decode("utf8")
+    assert "Kavya Anand" in body
+    assert "<" not in body, "markup leaked into the plain-text part"
+    assert "Sahana Ramamoorthi" in body
+
+
+def test_html_is_the_preferred_alternative(monkeypatch):
+    """A client renders the last part it understands, so order is the
+    mechanism that makes HTML win."""
+    msg = _build(monkeypatch)
+    alt = next(p for p in msg.walk() if p.get_content_type() == "multipart/alternative")
+    kinds = [p.get_content_type() for p in alt.get_payload()]
+    assert kinds == ["text/plain", "text/html"]
+
+
+def test_the_document_is_still_a_separate_attachment(monkeypatch):
+    """Nesting the alternative inside `related` must not swallow the PDF."""
+    msg = _build(monkeypatch)
+    pdfs = [p for p in msg.walk() if p.get_content_type() == "application/pdf"]
+    assert len(pdfs) == 1
+    assert pdfs[0].get_content_disposition() == "attachment"
+    assert pdfs[0].get_payload(decode=True).startswith(b"%PDF")

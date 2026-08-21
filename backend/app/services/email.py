@@ -10,11 +10,13 @@ starts actually delivering, no code change required.
 from __future__ import annotations
 
 import logging
+import re
 import smtplib
 from email.mime.application import MIMEApplication
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from html import unescape
 from pathlib import Path
 
 from app.core.config import settings
@@ -59,6 +61,27 @@ _WRAPPER = """\
   </td></tr>
 </table>
 """
+
+
+def _plain_text_of(html: str) -> str:
+    """A readable text/plain version of the body.
+
+    A message carrying only text/html scores worse with spam filters, and it
+    is unreadable in clients that refuse HTML outright. Derived from the same
+    markup rather than written twice, so the two can never drift apart.
+    """
+    text = re.sub(r"<br\s*/?>", "\n", html, flags=re.I)
+    text = re.sub(r"</p\s*>", "\n\n", text, flags=re.I)
+    text = re.sub(r"</tr\s*>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = unescape(text)
+    # Collapse the whitespace the table markup leaves behind, while keeping
+    # the paragraph breaks that make it readable.
+    text = re.sub(r"[ \t]+", " ", text)
+    lines = [line.strip() for line in text.splitlines()]
+    text = "\n".join(lines)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def _wrap(content: str) -> str:
@@ -240,7 +263,21 @@ def send_email(
     message["To"] = to_email
 
     related = MIMEMultipart("related")
-    related.attach(MIMEText(body_html, "html"))
+
+    # text/plain first, then text/html: a client renders the last part it
+    # understands, so the order is what makes HTML the preferred version.
+    #
+    # Both declare utf-8, which matters for more than accented characters. A
+    # us-ascii part is sent as unencoded 7-bit text, and this template's
+    # inline CSS runs well past the 1000-character line limit RFC 5321 sets —
+    # a strict relay rejects that outright, a lenient one may rewrap it and
+    # corrupt the structure tying the logo and attachment to the body.
+    # Declaring utf-8 gets it base64-encoded and wrapped, so no line can be
+    # too long by construction.
+    alternative = MIMEMultipart("alternative")
+    alternative.attach(MIMEText(_plain_text_of(body_html), "plain", "utf-8"))
+    alternative.attach(MIMEText(body_html, "html", "utf-8"))
+    related.attach(alternative)
 
     if LOGO_PATH.exists():
         logo = MIMEImage(LOGO_PATH.read_bytes(), _subtype="png")
