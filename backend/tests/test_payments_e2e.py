@@ -601,3 +601,52 @@ def test_the_export_can_be_narrowed_to_students_who_still_owe(client: TestClient
     )
     assert receipt_of[owing["id"]] in pending_only
     assert receipt_of[settled["id"]] not in pending_only
+
+
+def test_the_fee_cannot_be_edited_below_what_has_been_collected(
+    client: TestClient, user_repo
+):
+    """The dialog blocks this, but a UI check is not enforcement — the same
+    gap that let the `mine` flag leak the whole ledger."""
+    csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    student = _approve_with_fee(client, csrf, paid="8000", total_fees=20000)
+
+    res = client.patch(
+        f"/api/v1/students/{student['id']}",
+        json={"total_fees": 3000},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert res.status_code == 400, res.text
+    assert "8,000" in res.json()["detail"]
+
+    unchanged = client.get(f"/api/v1/students/{student['id']}").json()
+    assert unchanged["total_fees"] == 20000
+
+
+def test_raising_the_fee_reopens_a_pending_balance(client: TestClient, user_repo):
+    csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    student = _approve_with_fee(client, csrf, paid="8000", total_fees=8000)
+    assert student["total_fees"] - student["fees_paid"] == 0
+
+    res = client.patch(
+        f"/api/v1/students/{student['id']}",
+        json={"total_fees": 18000},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["total_fees"] - res.json()["fees_paid"] == 10000
+
+
+def test_an_hr_cannot_edit_the_fee_of_a_student_they_do_not_own(
+    client: TestClient, user_repo
+):
+    csrf_a, _ = _login_as(client, user_repo, role=UserRole.hr)
+    student = _approve_with_fee(client, csrf_a, paid="5000", total_fees=15000)
+
+    csrf_b, _ = _login_as(client, user_repo, role=UserRole.hr)
+    res = client.patch(
+        f"/api/v1/students/{student['id']}",
+        json={"total_fees": 99000},
+        headers={"X-CSRF-Token": csrf_b},
+    )
+    assert res.status_code == 403

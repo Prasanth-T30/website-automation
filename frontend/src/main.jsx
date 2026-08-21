@@ -10,8 +10,16 @@ import "@/styles/globals.css";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
-      refetchOnWindowFocus: false,
+      // Three HRs work the same pool at once, so a stale screen is a real
+      // hazard: two people claiming the same applicant, or an HR recording a
+      // payment against a balance someone else already changed.
+      staleTime: 15_000,
+      refetchInterval: 30_000,
+      // Polling pauses while the tab is hidden — no point spending requests
+      // on a screen nobody is looking at. Refetching on focus covers the
+      // return, so coming back to the tab shows current figures immediately.
+      refetchIntervalInBackground: false,
+      refetchOnWindowFocus: true,
       // Auth failures are terminal — retrying them just delays the redirect.
       retry: (failureCount, error) =>
         !(error instanceof ApiError && error.isAuthError) && failureCount < 2,

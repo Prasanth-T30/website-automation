@@ -152,7 +152,22 @@ def update_student(
     s = _get_or_404(students, student_id)
     _require_owner_or_admin(s, user)
 
-    updated = students.update(student_id, data.model_dump(exclude_unset=True))
+    changes = data.model_dump(exclude_unset=True)
+    # The fee can never fall below what has already been collected. A negative
+    # balance reads as "settled" on every screen while the payment-capping rule
+    # quietly credits the student against their next installment.
+    new_total = changes.get("total_fees")
+    new_paid = changes.get("fees_paid", s.fees_paid)
+    if new_total is not None and new_total < new_paid:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{s.name} has already paid {new_paid:,.0f}. "
+                f"The total fee cannot be set below that."
+            ),
+        )
+
+    updated = students.update(student_id, changes)
     return StudentOut.model_validate(updated)
 
 
