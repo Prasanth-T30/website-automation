@@ -65,6 +65,11 @@ def hr_performance(
         claimed = sum(1 for a in all_applications if a.owner_id == hr.id)
         converted = [s for s in all_students if s.owner_id == hr.id]
         active = sum(1 for s in converted if s.status == "active")
+        # A conversion is a claimed application that became a student. A
+        # walk-in entered by hand has no application behind it, so counting it
+        # here produced rates like 600% — six students against one claim.
+        from_claims = sum(1 for s in converted if s.application_id)
+        walk_ins = len(converted) - from_claims
         hr_payments = [p for p in all_payments if p.owner_id == hr.id]
         revenue_all_time = sum(p.amount for p in hr_payments)
         revenue_this_month = sum(
@@ -78,7 +83,10 @@ def hr_performance(
                 role=hr.role.value,
                 claimed_count=claimed,
                 converted_count=len(converted),
-                conversion_rate=(len(converted) / claimed) if claimed else 0.0,
+                walk_in_count=walk_ins,
+                # Capped: an application claimed in a previous period can still
+                # convert in this one, which would otherwise read above 100%.
+                conversion_rate=min(from_claims / claimed, 1.0) if claimed else 0.0,
                 active_students=active,
                 revenue_this_month=revenue_this_month,
                 revenue_all_time=revenue_all_time,

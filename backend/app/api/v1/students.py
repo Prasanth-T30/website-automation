@@ -117,6 +117,7 @@ def create_student(
     data: StudentCreate,
     students: StudentRepo,
     batches: BatchRepo,
+    payments: PaymentRepo,
     activity_repo: ActivityRepo,
     user: ActiveUser,
 ) -> StudentOut:
@@ -154,6 +155,21 @@ def create_student(
         total_fees=data.total_fees,
         fees_paid=data.fees_paid,
     )
+
+    # An opening balance is money that has actually changed hands, so it gets
+    # a real receipt — exactly as approving an application does. Without this
+    # the amount sat on the student record but not in the ledger, so Finance's
+    # collected total, the Excel export and the student's own receipts would
+    # each report something different with no way to tell which was right.
+    if data.fees_paid > 0:
+        payments.record(
+            student_id=student.id,
+            owner_id=student.owner_id,
+            amount=data.fees_paid,
+            method=None,
+            notes="Opening balance recorded when the student was added by hand",
+            recorded_by_id=user.id,
+        )
 
     activity.record(
         activity_repo,
@@ -232,7 +248,7 @@ def update_student(
     # balance reads as "settled" on every screen while the payment-capping rule
     # quietly credits the student against their next installment.
     new_total = changes.get("total_fees")
-    new_paid = changes.get("fees_paid", s.fees_paid)
+    new_paid = s.fees_paid
     if new_total is not None and new_total < new_paid:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,

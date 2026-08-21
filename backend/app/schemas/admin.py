@@ -15,6 +15,11 @@ class HrPerformanceOut(BaseModel):
     role: str = "hr"
     claimed_count: int
     converted_count: int
+    # Students entered by hand, who never came through the public form. They
+    # count towards the book but not the conversion rate, because there was
+    # no claim to convert.
+    walk_in_count: int = 0
+    # Conversions of claimed applications only, so it cannot exceed 1.0.
     conversion_rate: float
     active_students: int
     revenue_this_month: float

@@ -650,3 +650,148 @@ def test_an_hr_cannot_edit_the_fee_of_a_student_they_do_not_own(
         headers={"X-CSRF-Token": csrf_b},
     )
     assert res.status_code == 403
+
+
+# ── Ledger integrity ─────────────────────────────────────────────────────
+
+
+def test_a_walk_ins_opening_balance_reaches_the_ledger(client: TestClient, user_repo):
+    """Money on the student record but not in the ledger meant Finance, the
+    Excel export and the student's own receipts each reported something
+    different, with no way to tell which was right."""
+    csrf, owner_id = _login_as(client, user_repo, role=UserRole.hr)
+    res = client.post(
+        "/api/v1/students",
+        json={
+            "name": "Walk In Paid Upfront", "email": f"{_unique('wi')}@example.com",
+            "phone": "9876543210", "college": "PSG College of Technology",
+            "place": "Coimbatore", "category": "Internship", "domain": "DevOps",
+            "duration": "30 Days", "total_fees": 12000, "fees_paid": 5000,
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert res.status_code == 201, res.text
+    sid = res.json()["id"]
+
+    ledger = client.get("/api/v1/payments", params={"student_id": sid}).json()
+    assert ledger, "the opening balance never reached the ledger"
+    assert sum(p["amount"] for p in ledger) == 5000
+    assert all(p["owner_id"] == owner_id for p in ledger)
+    assert ledger[0]["receipt_number"], "no receipt was issued for money taken"
+
+
+def test_a_walk_in_with_no_opening_balance_gets_no_phantom_receipt(
+    client: TestClient, user_repo
+):
+    csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    sid = client.post(
+        "/api/v1/students",
+        json={
+            "name": "Walk In Owes All", "email": f"{_unique('wi')}@example.com",
+            "phone": "9876543210", "college": "PSG College of Technology",
+            "place": "Coimbatore", "category": "Internship", "domain": "DevOps",
+            "duration": "30 Days", "total_fees": 12000, "fees_paid": 0,
+        },
+        headers={"X-CSRF-Token": csrf},
+    ).json()["id"]
+
+    assert client.get("/api/v1/payments", params={"student_id": sid}).json() == []
+
+
+def test_fees_paid_cannot_be_set_directly(client: TestClient, user_repo):
+    """It is the sum of the receipts. Editing it would desync the two
+    permanently, so the field is not on the update schema at all."""
+    csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+    student = _approve_with_fee(client, csrf, paid="5000", total_fees=20000)
+
+    res = client.patch(
+        f"/api/v1/students/{student['id']}",
+        json={"fees_paid": 999999}, headers={"X-CSRF-Token": csrf},
+    )
+    assert res.status_code == 200  # accepted, but the field is ignored
+    assert client.get(f"/api/v1/students/{student['id']}").json()["fees_paid"] == 5000
+
+
+def test_the_ledger_and_the_student_record_agree_after_every_route_in(
+    client: TestClient, user_repo
+):
+    """Three ways money arrives — approval, walk-in opening balance, and a
+    recorded installment. All three must leave the two in step."""
+    csrf, _ = _login_as(client, user_repo, role=UserRole.hr)
+
+    approved = _approve_with_fee(client, csrf, paid="3000", total_fees=10000)
+    client.post(
+        "/api/v1/payments/record",
+        json={"student_id": approved["id"], "amount": 2000},
+        headers={"X-CSRF-Token": csrf},
+    )
+    walk_in = client.post(
+        "/api/v1/students",
+        json={
+            "name": "Mixed Routes", "email": f"{_unique('mx')}@example.com",
+            "phone": "9876543210", "college": "PSG College of Technology",
+            "place": "Coimbatore", "category": "Internship", "domain": "DevOps",
+            "duration": "30 Days", "total_fees": 8000, "fees_paid": 1500,
+        },
+        headers={"X-CSRF-Token": csrf},
+    ).json()
+
+    for sid in (approved["id"], walk_in["id"]):
+        record = client.get(f"/api/v1/students/{sid}").json()
+        ledger = client.get("/api/v1/payments", params={"student_id": sid}).json()
+        assert sum(p["amount"] for p in ledger) == record["fees_paid"], (
+            f"{record['name']}: ledger says "
+            f"{sum(p['amount'] for p in ledger)}, record says {record['fees_paid']}"
+        )
+
+
+def test_the_conversion_rate_can_never_exceed_one_hundred_percent(
+    client: TestClient, user_repo
+):
+    """A hand-entered walk-in has no application behind it, so counting it as
+    a conversion produced rates like 600% — six students against one claim."""
+    csrf, hr_id = _login_as(client, user_repo, role=UserRole.hr)
+    _approve_with_fee(client, csrf, paid="1000", total_fees=5000)  # one real claim
+    for i in range(3):  # three walk-ins, no claims
+        client.post(
+            "/api/v1/students",
+            json={
+                "name": f"Walk In {i}", "email": f"{_unique('wi')}@example.com",
+                "phone": "9876543210", "college": "PSG College of Technology",
+                "place": "Coimbatore", "category": "Internship", "domain": "DevOps",
+                "duration": "30 Days", "total_fees": 5000, "fees_paid": 0,
+            },
+            headers={"X-CSRF-Token": csrf},
+        )
+
+    admin_csrf, _ = _login_as(client, user_repo, role=UserRole.admin)
+    row = next(
+        r for r in client.get("/api/v1/admin/hr-performance").json() if r["id"] == hr_id
+    )
+    assert row["conversion_rate"] <= 1.0, f"{row['conversion_rate']:.0%} is impossible"
+    assert row["walk_in_count"] == 3
+    assert row["converted_count"] == 4, "the book should still count everyone"
+
+
+def test_walk_ins_are_reported_separately_from_conversions(client: TestClient, user_repo):
+    csrf, hr_id = _login_as(client, user_repo, role=UserRole.hr)
+    client.post(
+        "/api/v1/students",
+        json={
+            "name": "Only A Walk In", "email": f"{_unique('wi')}@example.com",
+            "phone": "9876543210", "college": "PSG College of Technology",
+            "place": "Coimbatore", "category": "Internship", "domain": "DevOps",
+            "duration": "30 Days", "total_fees": 5000, "fees_paid": 0,
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    admin_csrf, _ = _login_as(client, user_repo, role=UserRole.admin)
+    row = next(
+        r for r in client.get("/api/v1/admin/hr-performance").json() if r["id"] == hr_id
+    )
+    # No claims at all, so no conversion rate to speak of — not a division by
+    # zero, and not a misleading 100%.
+    assert row["claimed_count"] == 0
+    assert row["conversion_rate"] == 0.0
+    assert row["walk_in_count"] == 1

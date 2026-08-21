@@ -12,8 +12,10 @@ from __future__ import annotations
 import logging
 import smtplib
 from email.mime.application import MIMEApplication
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 
 from app.core.config import settings
 from app.core.constants import (
@@ -29,12 +31,22 @@ from app.models.student import Student
 
 logger = logging.getLogger(__name__)
 
+ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+LOGO_PATH = ASSETS_DIR / "dvein_logo.png"
+
+# Referenced from the HTML as `cid:dvein-logo`. An inline attachment rather
+# than a hosted URL: most clients block remote images by default, so a linked
+# logo shows as a broken box until the reader clicks "display images" — and a
+# letter from an institute should look right on first open.
+LOGO_CID = "dvein-logo"
+
 _WRAPPER = """\
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#EEF2F8;padding:24px 0;">
   <tr><td align="center">
     <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;font-family:Arial,sans-serif;">
-      <tr><td style="background:#3569AC;padding:18px 24px;">
-        <span style="color:#ffffff;font-size:16px;font-weight:bold;">{company}</span>
+      <tr><td style="background:#ffffff;padding:20px 24px 12px;border-bottom:3px solid #3569AC;">
+        <img src="cid:dvein-logo" alt="{company}" width="180"
+             style="display:block;border:0;outline:none;max-width:180px;height:auto;">
       </td></tr>
       <tr><td style="padding:24px;color:#0F1B2D;font-size:14px;line-height:1.6;">
         {body}
@@ -212,11 +224,35 @@ def send_email(
         logger.warning("SMTP not configured — skipping email to %s (%s)", to_email, subject)
         return False
 
-    message = MIMEMultipart()
+    # Structure matters here. An inline image has to sit in a `related` part
+    # alongside the HTML that references it; a document the reader saves goes
+    # in the outer `mixed` part. Flattening the two makes clients show the
+    # logo as a second downloadable attachment instead of rendering it.
+    #
+    #   multipart/mixed
+    #     multipart/related
+    #       text/html
+    #       image/png   (inline, Content-ID)
+    #     application/pdf  (attachment)
+    message = MIMEMultipart("mixed")
     message["Subject"] = subject
     message["From"] = f"{settings.smtp_from_name} <{settings.smtp_from_email}>"
     message["To"] = to_email
-    message.attach(MIMEText(body_html, "html"))
+
+    related = MIMEMultipart("related")
+    related.attach(MIMEText(body_html, "html"))
+
+    if LOGO_PATH.exists():
+        logo = MIMEImage(LOGO_PATH.read_bytes(), _subtype="png")
+        logo.add_header("Content-ID", f"<{LOGO_CID}>")
+        # Inline, so it renders in the body rather than appearing in the
+        # client's attachment list next to the real document.
+        logo.add_header("Content-Disposition", "inline", filename="dvein-logo.png")
+        related.attach(logo)
+    else:
+        logger.warning("Email logo missing at %s — sending without it", LOGO_PATH)
+
+    message.attach(related)
 
     if pdf_bytes and pdf_filename:
         attachment = MIMEApplication(pdf_bytes, _subtype="pdf")

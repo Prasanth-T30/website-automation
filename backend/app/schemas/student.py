@@ -73,8 +73,13 @@ class StudentUpdate(BaseModel):
     batch_id: str | None = None
     status: str | None = Field(default=None, description="active | completed | dropped")
     payment_status: str | None = Field(default=None, description="paid | pending | overdue")
-    fees_paid: float | None = Field(default=None, ge=0)
     total_fees: float | None = Field(default=None, ge=0)
+
+    # `fees_paid` is deliberately absent. It is the sum of the receipts issued
+    # against this student, so setting it directly would put the record and
+    # the ledger permanently out of step — the Finance screen, the Excel
+    # export and the student's own receipts would then disagree, with no way
+    # to tell which was right. Record a payment to change it.
 
 
 class StudentReassign(BaseModel):
