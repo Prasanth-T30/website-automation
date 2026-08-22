@@ -54,6 +54,11 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
+        # A browser hides every response header from cross-origin JavaScript
+        # unless it is named here — `allow_headers` governs the request side
+        # only. Without this the console silently sees no pagination cursor
+        # and stops at the first page, believing it has everything.
+        expose_headers=["X-Next-Cursor"],
     )
 
     app.include_router(api_router)

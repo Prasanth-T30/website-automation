@@ -35,7 +35,12 @@ from app.models.student import Student
 logger = logging.getLogger(__name__)
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
-LOGO_PATH = ASSETS_DIR / "dvein_logo.png"
+# A separate, email-sized copy. The print asset is 1110px wide and 58 KB; the
+# header renders at 180px, so shipping the full one puts 34 KB of invisible
+# detail on every message — weight that counts against a spam score for
+# nothing. Flattened onto white too: the header is white, and alpha PNGs are
+# both larger and inconsistently rendered by older clients.
+LOGO_PATH = ASSETS_DIR / "email_logo.png"
 
 # Referenced from the HTML as `cid:dvein-logo`. An inline attachment rather
 # than a hosted URL: most clients block remote images by default, so a linked
