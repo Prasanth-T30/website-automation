@@ -33,8 +33,12 @@ export function Dialog({ open, onOpenChange, title, description, children, foote
 
           <div className="p-5">{children}</div>
 
+          {/* Pinned to the bottom of the scroll area. A dialog holding a tall
+              preview would otherwise push its own actions out of view, and an
+              embedded PDF swallows the scroll wheel — so the reader sees a
+              document with no apparent way to act on it. */}
           {footer && (
-            <div className="flex justify-end gap-2 border-t border-line-subtle bg-subtle/50 px-5 py-3">
+            <div className="sticky bottom-0 flex justify-end gap-2 border-t border-line-subtle bg-surface px-5 py-3">
               {footer}
             </div>
           )}

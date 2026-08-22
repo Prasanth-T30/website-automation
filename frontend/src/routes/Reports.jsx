@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Award,
+  Download,
   FileSignature,
   FileText,
   Receipt,
@@ -356,6 +357,23 @@ function OfferLetterPanel() {
           title={`Offer letter — ${selected.name}`}
           description={`Review it, then send to ${selected.email}.`}
           className="max-w-3xl"
+          footer={
+            <>
+              <a
+                href={studentsApi.offerLetterUrl(selected.id)}
+                download
+                className="mr-auto flex items-center gap-1.5 text-xs font-semibold text-[var(--brand-text)] hover:underline"
+              >
+                <Download className="size-3.5" aria-hidden /> Download a copy
+              </a>
+              <Button type="button" variant="secondary" onClick={() => setSelected(null)}>
+                Cancel
+              </Button>
+              <Button onClick={() => send.mutate(selected.id)} loading={send.isPending}>
+                <Send className="size-4" aria-hidden /> Send email
+              </Button>
+            </>
+          }
         >
           <div className="flex flex-col gap-4">
             {selected.already_issued && (
@@ -372,15 +390,6 @@ function OfferLetterPanel() {
               src={studentsApi.offerLetterUrl(selected.id)}
               className="h-[60vh] w-full rounded-md border border-line bg-subtle"
             />
-
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="secondary" onClick={() => setSelected(null)}>
-                Cancel
-              </Button>
-              <Button onClick={() => send.mutate(selected.id)} loading={send.isPending}>
-                <Send className="size-4" aria-hidden /> Send email
-              </Button>
-            </div>
           </div>
         </Dialog>
       )}
