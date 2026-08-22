@@ -256,7 +256,7 @@ def test_list_applications_mine_filter(client: TestClient, user_repo):
 
 
 def _live_site_payload(**overrides) -> dict:
-    """Exactly what dveinweb-automation.vercel.app posts.
+    """Exactly what the retired Vercel form posted.
 
     Note `salutation` rather than `title`, the `mode` and `project_topic`
     fields, and a domain from the older list the deployed site still ships.

@@ -148,11 +148,12 @@ async def submit_application(
     return ApplicationOut.model_validate(created)
 
 
-# ── Compatibility surface for the deployed registration site ────────────────
-# The site at dveinweb-automation.vercel.app posts to `<base>/register`, a path
-# it inherited from the standalone backend this one replaces. Exposing the same
-# handler there means switching that site over is a change of one environment
-# variable, with no redeploy of its code and no window where submissions 404.
+# ── Compatibility surface ───────────────────────────────────────────────────
+# `<base>/register` is the path the previous standalone backend used, and the
+# retired Vercel form posted to it. That form is no longer the published one
+# and its origin has been removed from CORS, but the route stays: a bookmark,
+# a cached page or a link in an old email would otherwise 404 silently, and a
+# lost registration is worse than an extra route.
 #
 # It is the identical function, not a copy: same validation, same rate limit,
 # same storage write, so the two paths cannot drift apart.
