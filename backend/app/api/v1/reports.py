@@ -23,7 +23,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import ActivityRepo, CurrentUser, ReportRepo, Storage, StudentRepo
+from app.api.deps import ActiveUser, ActivityRepo, ReportRepo, Storage, StudentRepo
 from app.core.config import settings
 from app.models.report import Report
 from app.models.user import UserRole
@@ -60,7 +60,7 @@ def _visible_to(report: Report, user, students: StudentRepo) -> bool:
 def list_reports(
     reports: ReportRepo,
     students: StudentRepo,
-    user: CurrentUser,
+    user: ActiveUser,
     category: str | None = Query(None),
     student_id: str | None = Query(None),
 ) -> list[ReportOut]:
@@ -73,7 +73,7 @@ async def upload_report(
     reports: ReportRepo,
     storage: Storage,
     activity_repo: ActivityRepo,
-    user: CurrentUser,
+    user: ActiveUser,
     title: str = Form(...),
     category: str = Form(...),
     student_id: str | None = Form(None),
@@ -132,7 +132,7 @@ def download_report(
     reports: ReportRepo,
     students: StudentRepo,
     storage: Storage,
-    user: CurrentUser,
+    user: ActiveUser,
 ) -> StreamingResponse:
     report = _get_or_404(reports, report_id)
     if not _visible_to(report, user, students):
@@ -156,7 +156,7 @@ def delete_report(
     reports: ReportRepo,
     storage: Storage,
     activity_repo: ActivityRepo,
-    user: CurrentUser,
+    user: ActiveUser,
 ) -> None:
     report = _get_or_404(reports, report_id)
     if user.role is not UserRole.admin and report.uploaded_by_id != user.id:

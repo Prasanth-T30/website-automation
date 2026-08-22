@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import ActivityRepo, CurrentUser, PaymentRepo, StudentRepo, UserRepo
+from app.api.deps import ActiveUser, ActivityRepo, PaymentRepo, StudentRepo, UserRepo
 from app.models.student import Student
 from app.models.user import UserRole
 from app.schemas.payment import PaymentOut, PaymentRecord
@@ -110,7 +110,7 @@ def _revenue_scope(user, mine: bool) -> str | None:
 @router.get("", response_model=list[PaymentOut])
 def list_payments(
     payments: PaymentRepo,
-    user: CurrentUser,
+    user: ActiveUser,
     student_id: str | None = Query(None),
     mine: bool = Query(False, description="Only payments attributed to the caller"),
     limit: int | None = Query(None, ge=1, le=500, description="Page size. Omit for the full list."),
@@ -138,7 +138,7 @@ def export_payments_xlsx(
     payments: PaymentRepo,
     students: StudentRepo,
     users: UserRepo,
-    user: CurrentUser,
+    user: ActiveUser,
     mine: bool = Query(False),
     method: str | None = Query(None),
     college: str | None = Query(None),
@@ -164,7 +164,7 @@ def export_payments_pdf(
     payments: PaymentRepo,
     students: StudentRepo,
     users: UserRepo,
-    user: CurrentUser,
+    user: ActiveUser,
     mine: bool = Query(False),
     method: str | None = Query(None),
     college: str | None = Query(None),
@@ -191,7 +191,7 @@ def record_payment(
     payments: PaymentRepo,
     students: StudentRepo,
     activity_repo: ActivityRepo,
-    user: CurrentUser,
+    user: ActiveUser,
 ) -> PaymentOut:
     student = _get_student_or_404(students, data.student_id)
     if user.role is not UserRole.admin and student.owner_id != user.id:
@@ -230,7 +230,7 @@ def record_payment(
 
 @router.get("/{transaction_id}/receipt")
 def download_receipt(
-    transaction_id: str, payments: PaymentRepo, students: StudentRepo, user: CurrentUser
+    transaction_id: str, payments: PaymentRepo, students: StudentRepo, user: ActiveUser
 ) -> StreamingResponse:
     payment = payments.get(transaction_id)
     if payment is None:

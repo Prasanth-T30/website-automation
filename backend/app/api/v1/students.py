@@ -20,7 +20,6 @@ from app.api.deps import (
     AdminUser,
     ApplicationRepo,
     BatchRepo,
-    CurrentUser,
     PaymentRepo,
     ReportRepo,
     Storage,
@@ -65,7 +64,7 @@ def _get_or_404(students: StudentRepo, student_id: str) -> Student:
     return s
 
 
-def _require_owner_or_admin(s: Student, user: CurrentUser) -> None:
+def _require_owner_or_admin(s: Student, user: ActiveUser) -> None:
     if user.role is not UserRole.admin and s.owner_id != user.id:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, detail="Only this student's owner can make changes."
@@ -75,7 +74,7 @@ def _require_owner_or_admin(s: Student, user: CurrentUser) -> None:
 @router.get("", response_model=list[StudentOut])
 def list_students(
     students: StudentRepo,
-    user: CurrentUser,
+    user: ActiveUser,
     mine: bool = Query(False, description="Admin only: narrow to the caller's own students"),
     batch_id: str | None = Query(None),
     no_batch: bool = Query(False, description="Only students not yet assigned to a batch"),
@@ -183,7 +182,7 @@ def create_student(
 
 
 @router.get("/{student_id}", response_model=StudentOut)
-def get_student(student_id: str, students: StudentRepo, _: CurrentUser) -> StudentOut:
+def get_student(student_id: str, students: StudentRepo, _: ActiveUser) -> StudentOut:
     return StudentOut.model_validate(_get_or_404(students, student_id))
 
 
@@ -194,7 +193,7 @@ def update_student(
     students: StudentRepo,
     batches: BatchRepo,
     users: UserRepo,
-    user: CurrentUser,
+    user: ActiveUser,
 ) -> StudentOut:
     s = _get_or_404(students, student_id)
     _require_owner_or_admin(s, user)
@@ -431,7 +430,7 @@ def issue_certificate(
 
 @router.get("/{student_id}/certificate")
 def preview_certificate(
-    student_id: str, students: StudentRepo, batches: BatchRepo, user: CurrentUser
+    student_id: str, students: StudentRepo, batches: BatchRepo, user: ActiveUser
 ) -> StreamingResponse:
     """Render the certificate without issuing it — no email, nothing filed.
 
@@ -456,7 +455,7 @@ def offer_letter_candidates(
     students: StudentRepo,
     payments: PaymentRepo,
     reports: ReportRepo,
-    user: CurrentUser,
+    user: ActiveUser,
 ) -> list[OfferCandidate]:
     """Students who may be sent an offer letter: anyone who has paid.
 
@@ -520,7 +519,7 @@ def preview_offer_letter(
     student_id: str,
     students: StudentRepo,
     applications: ApplicationRepo,
-    user: CurrentUser,
+    user: ActiveUser,
 ) -> StreamingResponse:
     """Render the letter without issuing it — no email, nothing filed.
 

@@ -13,7 +13,7 @@ import io
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import ActivityRepo, ApplicationRepo, CurrentUser, PaymentRepo, StudentRepo
+from app.api.deps import ActiveUser, ActivityRepo, ApplicationRepo, PaymentRepo, StudentRepo
 from app.models.application import Application
 from app.models.user import UserRole
 from app.repositories.applications import ApplicationNotClaimable
@@ -32,7 +32,7 @@ def _get_or_404(applications: ApplicationRepo, application_id: str) -> Applicati
     return app_
 
 
-def _require_owner_or_admin(app_: Application, user: CurrentUser) -> None:
+def _require_owner_or_admin(app_: Application, user: ActiveUser) -> None:
     if user.role is not UserRole.admin and app_.owner_id != user.id:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
@@ -43,7 +43,7 @@ def _require_owner_or_admin(app_: Application, user: CurrentUser) -> None:
 @router.get("", response_model=list[ApplicationOut])
 def list_applications(
     applications: ApplicationRepo,
-    user: CurrentUser,
+    user: ActiveUser,
     status_filter: str | None = Query(None, alias="status"),
     mine: bool = Query(False, description="Only applications the caller has claimed"),
     limit: int | None = Query(None, ge=1, le=500, description="Page size. Omit for the full list."),
@@ -71,7 +71,7 @@ def claim_application(
     application_id: str,
     applications: ApplicationRepo,
     activity_repo: ActivityRepo,
-    user: CurrentUser,
+    user: ActiveUser,
 ) -> ApplicationOut:
     try:
         claimed = applications.claim(application_id, user.id)
@@ -100,7 +100,7 @@ def approve_application(
     students: StudentRepo,
     payments: PaymentRepo,
     activity_repo: ActivityRepo,
-    user: CurrentUser,
+    user: ActiveUser,
 ) -> ApplicationOut:
     app_ = _get_or_404(applications, application_id)
     _require_owner_or_admin(app_, user)
@@ -157,7 +157,7 @@ def reject_application(
     data: RejectRequest,
     applications: ApplicationRepo,
     activity_repo: ActivityRepo,
-    user: CurrentUser,
+    user: ActiveUser,
 ) -> ApplicationOut:
     app_ = _get_or_404(applications, application_id)
     _require_owner_or_admin(app_, user)
@@ -187,7 +187,7 @@ def reject_application(
 
 @router.get("/{application_id}/offer-letter")
 def download_offer_letter(
-    application_id: str, applications: ApplicationRepo, user: CurrentUser
+    application_id: str, applications: ApplicationRepo, user: ActiveUser
 ) -> StreamingResponse:
     """Re-download the offer letter on demand — same PDF the approval email
     would have carried, regenerated fresh rather than stored, since the

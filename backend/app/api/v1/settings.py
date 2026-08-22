@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.deps import ActivityRepo, AdminUser, CurrentUser, SettingsRepo
+from app.api.deps import ActiveUser, ActivityRepo, AdminUser, SettingsRepo
 from app.schemas.settings import SettingsOut, SettingsUpdate
 from app.services import activity
 
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/settings", tags=["Settings"])
 
 
 @router.get("", response_model=SettingsOut)
-def get_settings(settings_repo: SettingsRepo, _: CurrentUser) -> SettingsOut:
+def get_settings(settings_repo: SettingsRepo, _: ActiveUser) -> SettingsOut:
     return SettingsOut.model_validate(settings_repo.get())
 
 

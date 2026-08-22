@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from app.api.deps import AttendanceRepo, CurrentUser, StudentRepo
+from app.api.deps import ActiveUser, AttendanceRepo, StudentRepo
 from app.models.user import UserRole
 from app.schemas.attendance import AttendanceMark, AttendanceOut
 
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/attendance", tags=["Attendance"])
 def list_attendance(
     attendance: AttendanceRepo,
     students: StudentRepo,
-    user: CurrentUser,
+    user: ActiveUser,
     student_id: str | None = Query(None),
     batch_id: str | None = Query(None),
     date_filter: str | None = Query(None, alias="date"),
@@ -31,7 +31,7 @@ def list_attendance(
 
 @router.post("", response_model=AttendanceOut, status_code=status.HTTP_201_CREATED)
 def mark_attendance(
-    data: AttendanceMark, attendance: AttendanceRepo, students: StudentRepo, user: CurrentUser
+    data: AttendanceMark, attendance: AttendanceRepo, students: StudentRepo, user: ActiveUser
 ) -> AttendanceOut:
     student = students.get(data.student_id)
     if student is None:

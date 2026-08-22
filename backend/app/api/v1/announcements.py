@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from app.api.deps import ActivityRepo, AdminUser, AnnouncementRepo, CurrentUser, UserRepo
+from app.api.deps import ActiveUser, ActivityRepo, AdminUser, AnnouncementRepo, UserRepo
 from app.schemas.announcement import AnnouncementCreate, AnnouncementOut
 from app.services import activity
 
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/announcements", tags=["Announcements"])
 def list_announcements(
     announcements: AnnouncementRepo,
     users: UserRepo,
-    user: CurrentUser,
+    user: ActiveUser,
     include_expired: bool = Query(False, description="Admin housekeeping view"),
 ) -> list[AnnouncementOut]:
     # Only an admin may look at what has already lapsed — for anyone else an

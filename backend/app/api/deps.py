@@ -112,22 +112,22 @@ def get_current_user(request: Request, users: UserRepo) -> User:
     return user
 
 
+# Signed in, and nothing more. Reserve this for the handful of endpoints that
+# must work *during* a forced password change — reading your own identity,
+# changing the password, refreshing, signing out. Everywhere else wants
+# ActiveUser, because a temporary password is a credential that has very
+# likely been written down, sent over chat, or read aloud.
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
-def require_admin(user: CurrentUser) -> User:
-    if user.role is not UserRole.admin:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN, detail="This action requires an administrator account."
-        )
-    return user
-
-
-AdminUser = Annotated[User, Depends(require_admin)]
-
-
 def require_password_current(user: CurrentUser) -> User:
-    """Block normal API use while a forced password change is outstanding."""
+    """Block normal API use while a forced password change is outstanding.
+
+    The point of issuing a one-time password is that its useful life ends at
+    first sign-in. That only holds if the rest of the API refuses to serve the
+    holder until it is replaced — otherwise the flag is decorative and the
+    temporary credential is simply a working password.
+    """
     if user.must_change_password:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
@@ -137,3 +137,21 @@ def require_password_current(user: CurrentUser) -> User:
 
 
 ActiveUser = Annotated[User, Depends(require_password_current)]
+
+
+def require_admin(user: ActiveUser) -> User:
+    """Admin, and past the forced password change.
+
+    Built on ActiveUser rather than CurrentUser deliberately: administrative
+    actions — creating accounts, resetting other people's passwords — are the
+    last things that should be reachable with a credential still pending
+    replacement.
+    """
+    if user.role is not UserRole.admin:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail="This action requires an administrator account."
+        )
+    return user
+
+
+AdminUser = Annotated[User, Depends(require_admin)]

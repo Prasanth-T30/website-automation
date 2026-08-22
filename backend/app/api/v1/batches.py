@@ -17,7 +17,6 @@ from app.api.deps import (
     ActiveUser,
     ActivityRepo,
     BatchRepo,
-    CurrentUser,
     PaymentRepo,
     StudentRepo,
     UserRepo,
@@ -76,7 +75,7 @@ def list_batches(
     batches: BatchRepo,
     students: StudentRepo,
     users: UserRepo,
-    user: CurrentUser,
+    user: ActiveUser,
     status_filter: str | None = Query(None, alias="status"),
 ) -> list[BatchOut]:
     batches.sync_lifecycle()  # same "runs on every list" pattern as the old app
@@ -127,7 +126,7 @@ def get_batch(
     batches: BatchRepo,
     students: StudentRepo,
     users: UserRepo,
-    user: CurrentUser,
+    user: ActiveUser,
 ) -> BatchOut:
     batch = _get_or_404(batches, batch_id)
     owner = users.get(batch.created_by_id) if batch.created_by_id else None
@@ -206,7 +205,7 @@ def batch_roster(
     batches: BatchRepo,
     students: StudentRepo,
     users: UserRepo,
-    user: CurrentUser,
+    user: ActiveUser,
 ) -> list[BatchRosterEntry]:
     """Everyone on this batch, with fees only for the ones you own.
 
@@ -247,7 +246,7 @@ def batch_finance(
     batches: BatchRepo,
     students: StudentRepo,
     payments: PaymentRepo,
-    user: CurrentUser,
+    user: ActiveUser,
 ) -> BatchFinance:
     """What this batch is worth — to you, or to the institute if you are admin.
 
