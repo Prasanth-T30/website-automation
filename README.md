@@ -131,73 +131,175 @@ docker compose up --build
 
 `api` reaches the host-run emulator via `host.docker.internal`.
 
-## Deploying to Firebase
+## Running in production
 
-Three pieces, one Firebase project, one Firestore database. Both the console
-and the public form are static sites on Hosting; the API is a container on
-Cloud Run, reached through a Hosting rewrite at `/api/**` so the browser stays
-same-origin and the auth cookies remain first-party.
+Live at:
 
-**Do this once, in order.** The Firestore region is fixed at creation and
-cannot be changed afterwards.
+| Piece | Where |
+|---|---|
+| Console | https://dvein-hrm-console.web.app |
+| Public form | https://dvein-registration.web.app |
+| API | `dvein-hrm-api` on Cloud Run, `asia-south1` |
+| Database | Firestore `(default)`, `asia-south1` |
+| Files | `dvein-hrm.firebasestorage.app` |
+| Project | `dvein-hrm` |
+
+### How the browser reaches the API
+
+**Both sites call Cloud Run directly.** `VITE_API_URL` is baked into each
+build at compile time and points at the service URL.
+
+They do *not* go through a Firebase Hosting rewrite, and that is deliberate:
+Hosting strips every cookie except one named `__session` before forwarding a
+request. Sign-in appeared to succeed and every subsequent request arrived
+unauthenticated. The `/api/**` rewrite still exists in `firebase.json` — it is
+harmless and useful as a fallback — but nothing relies on it.
+
+Because the API is a different origin, three things must stay in step:
+
+- `CORS_ORIGINS` lists exactly the two site URLs
+- `COOKIE_SAMESITE=none` with `COOKIE_SECURE=true` — a browser silently
+  discards that combination if Secure is missing, and a startup validator
+  refuses to boot rather than let it happen quietly
+- The CSRF token is returned in the login response body as well as a cookie,
+  because JavaScript cannot read another origin's cookies
+
+### Redeploying
+
+Configuration lives **on the Cloud Run service**, not in the repository. A
+deploy that omits `--set-env-vars` preserves what is already set, so the
+everyday command is short:
 
 ```bash
-# 1. Point the repo at your real project (replaces the demo id).
-firebase use --add            # pick the project, alias it "default"
+pnpm deploy:api          # API only
+pnpm deploy:web          # both sites (rebuilds first)
+pnpm deploy:rules        # Firestore + Storage rules
 ```
+
+The frontends need `VITE_API_URL` at build time. It lives in
+`frontend/.env.production` and `registration/.env.production` — both
+gitignored, both containing the Cloud Run URL. **A machine that clones this
+repo will not have them**, and the resulting build silently falls back to
+same-origin, which reintroduces the cookie bug. Recreate them before building:
 
 ```bash
-# 2. Create the two Hosting sites and bind them to the targets in firebase.json.
-firebase hosting:sites:create dvein-hrm-console
-firebase hosting:sites:create dvein-hrm-apply
-firebase target:apply hosting console dvein-hrm-console
-firebase target:apply hosting registration dvein-hrm-apply
+echo "VITE_API_URL=https://dvein-hrm-api-931951603198.asia-south1.run.app" > frontend/.env.production
+echo "VITE_API_URL=https://dvein-hrm-api-931951603198.asia-south1.run.app" > registration/.env.production
 ```
+
+To change an environment variable, edit it on the service rather than
+redeploying from a file:
 
 ```bash
-# 3. Deploy the API. Its service account needs Firestore + Storage access;
-#    no key file is involved — Cloud Run supplies credentials ambiently.
-pnpm deploy:api
+gcloud run services update dvein-hrm-api --region asia-south1 \
+  --update-env-vars CORS_ORIGINS=https://a.web.app,https://b.web.app
 ```
+
+### Verifying a deploy
 
 ```bash
-# 4. Confirm the deployed service can actually reach the real project.
-#    Does a write/read/delete round trip against Firestore and Storage, and
-#    exits non-zero if either fails, so it can gate a release.
-gcloud run services proxy dvein-hrm-api --region asia-south1 &
-cd backend && uv run python -m app.cli check
+curl https://dvein-hrm-api-931951603198.asia-south1.run.app/health
+# {"status":"ok","version":"1.0.0","env":"production"}
 ```
+
+`env` must read `production`. If it says `development`, the service is running
+without its environment and is probably pointed at nothing.
+
+---
+
+## Operations
+
+### Adding an HR
+
+From the console: **Admin → Users → Add**. The account is created with a
+generated password and `must_change_password` set, so the person must replace
+it at first sign-in. Until they do, every endpoint outside `/auth/me` and
+`/auth/change-password` returns 403 — a temporary password is deliberately
+useless for anything but replacing itself.
+
+### Rotating the SMTP password
+
+The password is in Secret Manager, not in any file or image layer.
 
 ```bash
-# 5. Lock the database down, then publish both sites.
-pnpm deploy
+printf %s 'NEW_APP_PASSWORD' | gcloud secrets versions add smtp-password \
+  --data-file=- --project dvein-hrm
+gcloud run services update dvein-hrm-api --region asia-south1 \
+  --update-secrets SMTP_PASSWORD=smtp-password:latest
 ```
 
-Set these on the Cloud Run service (not in the image): `JWT_SECRET_KEY`,
-`CORS_ORIGINS`, `PUBLIC_BASE_URL`, `COOKIE_SECURE=true`, `APP_ENV=production`,
-`FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `REPORTING_TIMEZONE`, and the
-`SMTP_*` values. Leave `FIRESTORE_EMULATOR_HOST` and
-`FIREBASE_STORAGE_EMULATOR_HOST` **unset** — with neither those nor a service
-account path, the Admin SDK resolves credentials from the runtime, which is
-what you want on Cloud Run. Keep `JWT_SECRET_KEY` and `SMTP_PASSWORD` in Secret
-Manager and mount them as env vars.
+The service reads `:latest`, so the new version takes effect on the next
+revision. Update `.env` locally too if you send mail from a laptop.
 
-Seed the staff accounts once against production with both seed passwords blank,
-so each account is created with a generated password and must change it at
-first sign-in.
+### Rotating the JWT secret
 
-### Pointing the existing Vercel form at this backend
-
-The deployed registration site can keep running on Vercel — the API already
-allows its origin and exposes the `/register` path that site posts to. Change
-one environment variable there:
-
-```
-VITE_API_BASE_URL=https://<your-console-domain>/api/v1
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+gcloud run services update dvein-hrm-api --region asia-south1 \
+  --update-env-vars JWT_SECRET_KEY=<new value>
 ```
 
-No code change or rebuild of that app is needed. Moving it onto Hosting
-instead (target `registration`) makes it same-origin and removes the CORS hop.
+Every signed-in session dies immediately. That is the point — do it if a
+secret leaks, not routinely.
+
+### Backing up
+
+Firestore has no automatic backup on this project.
+
+```bash
+gcloud firestore export gs://dvein-hrm.firebasestorage.app/backups/$(date +%F) \
+  --project dvein-hrm
+```
+
+Worth scheduling before real data accumulates.
+
+### Reading logs
+
+```bash
+gcloud logging read \
+  'resource.type=cloud_run_revision AND resource.labels.service_name=dvein-hrm-api' \
+  --limit 50 --project dvein-hrm --format="value(textPayload)"
+```
+
+---
+
+## Known limitations
+
+Real, and worth knowing before they surprise someone.
+
+**Email lands in spam.** Sent from a personal Gmail (`info.dveininnovation@gmail.com`)
+with no domain sending reputation. The messages themselves are correct — proper
+`Date` and `Message-ID`, base64-encoded body, plain-text alternative, inline
+logo, PDF attached — and none of that outweighs the sender. The fix is a
+mailbox on `dveininnovation.com`, which already runs GoDaddy Professional Email
+with SPF configured. Four values in `.env` and a redeploy once someone with the
+GoDaddy account provides one.
+
+**The letterhead and the sender disagree.** PDFs print
+`info@dveininnovation.com`; mail arrives from the Gmail address. A student
+replying to the email and one writing to the address on their offer letter
+reach different inboxes.
+
+**Lists load in full.** Every list endpoint reads its whole collection and
+filters in Python. Cursor pagination exists (`?limit=&cursor=`, with an
+`X-Next-Cursor` header) but is opt-in, because the console derives its
+dashboard and Finance totals from complete lists — serving one page by default
+would make those figures wrong rather than merely slow. Moving the totals to
+server-side aggregates is the prerequisite for turning it on by default.
+
+**Rate limiting counts per instance.** In-memory storage, so the real limit is
+the configured one times the number of live Cloud Run instances. Set
+`RATE_LIMIT_STORAGE_URI` to a shared Redis before the numbers need to mean
+anything.
+
+**No frontend linting.** `pnpm lint` names a package that was never installed.
+Frontend tests exist but cover only the Finance arithmetic; the rest of the UI
+rests on the build compiling.
+
+**Attendance is a fixed trailing week.** No date navigation, no monthly report.
+
+**"Overdue" is inferred.** There is no due-date field; a balance counts as
+overdue once its batch is marked completed.
 
 ## Configuration
 
@@ -206,8 +308,9 @@ Every setting is documented in `.env.example`. Two worth calling out:
 - **`REPORTING_TIMEZONE`** (default `Asia/Kolkata`) — timestamps are stored in
   UTC, but monthly revenue is bucketed on this clock. A UTC boundary would push
   payments taken in the opening hours of each month into the month before.
-- **`SMTP_*`** — deliberately blank. Email sending switches on only when host,
-  username and password are all set; until then the app logs a warning and
+- **`SMTP_*`** — deliberately blank. Sending switches on when `SMTP_HOST` is
+  set; credentials are separate, so a local mail catcher needs none. Until
+  then the app logs a warning and
   carries on, so approving a student never depends on a mail server. Leave them
   unset in any environment holding restored production data, or approving a
   record there emails the real applicant.
@@ -230,9 +333,10 @@ shape are defined by the code that writes to them (`app/models/`,
 ## Tests
 
 Repository, Storage and full HTTP end-to-end tests run against the **real**
-Firebase emulator rather than mocks. **153 passing.** Tests auto-skip if the
-emulator isn't reachable, so a green run with everything skipped is not a pass —
-check the count.
+Firebase emulator rather than mocks. **295 backend, 20 frontend.**
+
+Backend tests auto-skip if the emulator is unreachable, so a green run with
+everything skipped is not a pass — check the count, not the colour.
 
 ```bash
 pnpm emulators:fresh
@@ -242,36 +346,56 @@ pnpm emulators:fresh
 cd backend && uv run pytest
 ```
 
+```bash
+cd frontend && pnpm test
+```
+
+`conftest.py` overwrites the SMTP settings rather than defaulting them: the
+developer `.env` holds working credentials, so without that every run would
+post real messages through the institute's mailbox and spend its daily quota.
+
 ## Roles
 
 | Role | Can |
 |---|---|
 | **admin** | Everything: manage HR accounts, reassign students, view every HR's performance and the activity log, edit institute settings |
-| **hr** | Claim from the shared pool, own and drive their students, record payments, mark attendance, issue certificates, upload files. Sees all students but only acts on their own. |
+| **hr** | Claim from the shared pool, own and drive their students, record payments, mark attendance, issue certificates, upload files. **Sees only their own students, revenue and documents.** |
 
-Batches are the exception to ownership: every HR sees the whole timetable and
-can create cohorts, but only the creator (or an admin) can edit or delete one.
+Isolation is enforced in the API, not the console. An HR reading `/students`
+or `/payments` gets their own records whatever the request asks for; only an
+admin can widen the view. This matters because the console reads those lists
+from a dozen screens, and one forgetting a filter would leak a colleague's
+book.
+
+Batches are the deliberate exception. Every HR sees the whole timetable and
+the people in each cohort — that is how you tell a viable batch from an empty
+one — but the fee figures come back null for a colleague's student, so the
+amounts never reach the browser at all. Only the creator or an admin can edit
+a batch or change who is in it, with one carve-out: a batch created by an
+admin is an institute cohort that any HR may fill, because otherwise an
+institute that sets its batches up centrally leaves every HR unable to place
+a single student.
 
 Students do not log in. The schema carries the fields a future student portal
 would need, so adding one later does not require a rework.
 
 ## Status
 
+Deployed and in use. Every phase below is live on `dvein-hrm`.
+
 - [x] **0 · Foundations** — monorepo, tooling, design tokens, compose
-- [x] **1 · Auth** — users, JWT cookies, CSRF, RBAC, seeded accounts
+- [x] **1 · Auth** — users, JWT cookies, CSRF, RBAC, forced password change
 - [x] **2 · Intake** — public registration form, shared pool, claim/approve/reject
 - [x] **3 · Core HRM** — students, batches, attendance, manual student entry
-- [x] **4 · Money** — payments, receipts, per-HR revenue attribution
-- [x] **5 · Files** — completion certificates, documents, derived notifications
-- [x] **6 · Analytics** — dashboard, HR performance, settings
-- [ ] **7 · Hardening** — production Firebase project, SMTP credentials,
-      frontend test coverage, deploy
+- [x] **4 · Money** — payments, receipts, per-HR revenue attribution, exports
+- [x] **5 · Files** — offer letters, certificates, documents, notifications
+- [x] **6 · Analytics** — dashboard, HR performance, announcements, settings
+- [x] **7 · Hardening** — production project, SMTP, cross-origin sessions,
+      pagination, isolation audit, frontend tests
 
-### Known gaps
+Both documents render onto Dvein's own supplied artwork: the body text is
+stripped from each template and recomposed, so the logo, watermark, seal,
+signature and footer are the originals. Only the name, programme and dates are
+drawn on top.
 
-- The completion certificate uses a house-style layout derived from the offer
-  letter, not a supplied design. Swapping it touches only the drawing code in
-  `services/pdf_certificate.py`.
-- Email cannot send until `SMTP_*` is configured; `email_sent` reports `false`
-  and the certificate is still generated and filed.
-- The frontend has a vitest harness wired up but no test files yet.
+See **Known limitations** above for what is genuinely outstanding.
