@@ -37,23 +37,27 @@ services:
         value: "30"
       - key: REFRESH_TOKEN_TTL_DAYS
         value: "14"
-      # The console is on a different host from the API, so the session cookie
-      # is cross-site: it needs SameSite=None, which browsers only honour on a
-      # Secure cookie. See the note about COOKIE_DOMAIN below.
+      # The browser only ever talks to the Vercel origin: vercel.json forwards
+      # /api to this service, so the session cookie is first-party and `lax`
+      # is both correct and stricter than the cross-site alternative.
+      #
+      # Switch to COOKIE_SAMESITE=none only if you point the frontends
+      # straight at this host instead of proxying — and know that Safari
+      # blocks the resulting third-party cookie whatever SameSite says.
       - key: COOKIE_SECURE
         value: "true"
       - key: COOKIE_SAMESITE
-        value: none
-      # Set this to a shared parent domain (".dveininnovation.com") once the
-      # console and API sit on subdomains of one domain. That makes the session
-      # cookie first-party, which is what stops Safari — and increasingly
-      # Chrome — from dropping it. Leave blank while both are on *.vercel.app
-      # and *.onrender.com, and expect sign-in to fail in Safari.
+        value: lax
+      # Only needed if the console and API end up on subdomains of one domain
+      # (".dveininnovation.com") and you stop proxying. Blank otherwise.
       - key: COOKIE_DOMAIN
         sync: false
 
       # ── Origins ───────────────────────────────────────────────────────
-      # Every origin that calls this API from a browser, comma separated.
+      # With the Vercel proxy in front, the browser never makes a cross-origin
+      # call and CORS is not exercised at all. Still worth setting to the two
+      # site origins: it is the backstop if anything ever calls this host
+      # directly, and an empty list would then refuse everything.
       - key: CORS_ORIGINS
         sync: false
       - key: PUBLIC_BASE_URL
