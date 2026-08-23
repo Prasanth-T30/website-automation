@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     # auto-detects these env vars and skips real GCP auth entirely.
     firebase_project_id: str = "demo-dvein-hrm"
     firebase_service_account_path: Path | None = None
+    # The same credential as a value rather than a file, for hosts that offer
+    # environment variables but no writable filesystem to put a key on
+    # (Render, Railway, Fly). Accepts the raw JSON or a base64 copy of it,
+    # because some dashboards mangle multi-line values. Ignored when
+    # `firebase_service_account_path` is set, so a real file always wins.
+    firebase_service_account_json: str | None = None
     firebase_storage_bucket: str = "demo-dvein-hrm.appspot.com"
     firestore_emulator_host: str | None = None
     firebase_storage_emulator_host: str | None = None
@@ -167,7 +173,8 @@ class Settings(BaseSettings):
         return v
 
     @field_validator(
-        "smtp_host", "smtp_username", "smtp_password", "automation_token", mode="before"
+        "smtp_host", "smtp_username", "smtp_password", "automation_token",
+        "firebase_service_account_json", mode="before"
     )
     @classmethod
     def _blank_smtp_field_to_none(cls, v: object) -> object:

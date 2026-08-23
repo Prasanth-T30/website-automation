@@ -1,0 +1,144 @@
+# Render blueprint — the API, and the scheduled document run.
+#
+# Firebase stays the database. Render has no GCP identity of its own, so the
+# Admin SDK cannot authenticate ambiently the way it does on Cloud Run: supply
+# a service account through FIREBASE_SERVICE_ACCOUNT_JSON (raw JSON, or base64
+# if the dashboard mangles newlines). Without it the API fails at startup.
+#
+# Every `sync: false` value is set once in the Render dashboard and never
+# committed. Nothing secret belongs in this file.
+
+services:
+  - type: web
+    name: dvein-hrm-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: starter
+    region: singapore
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+
+      # ── Firebase ──────────────────────────────────────────────────────
+      - key: FIREBASE_PROJECT_ID
+        value: dvein-hrm
+      - key: FIREBASE_STORAGE_BUCKET
+        value: dvein-hrm.firebasestorage.app
+      # The whole service-account key file, pasted as one value.
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+
+      # ── Security ──────────────────────────────────────────────────────
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: ACCESS_TOKEN_TTL_MINUTES
+        value: "30"
+      - key: REFRESH_TOKEN_TTL_DAYS
+        value: "14"
+      # The console is on a different host from the API, so the session cookie
+      # is cross-site: it needs SameSite=None, which browsers only honour on a
+      # Secure cookie. See the note about COOKIE_DOMAIN below.
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAMESITE
+        value: none
+      # Set this to a shared parent domain (".dveininnovation.com") once the
+      # console and API sit on subdomains of one domain. That makes the session
+      # cookie first-party, which is what stops Safari — and increasingly
+      # Chrome — from dropping it. Leave blank while both are on *.vercel.app
+      # and *.onrender.com, and expect sign-in to fail in Safari.
+      - key: COOKIE_DOMAIN
+        sync: false
+
+      # ── Origins ───────────────────────────────────────────────────────
+      # Every origin that calls this API from a browser, comma separated.
+      - key: CORS_ORIGINS
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+
+      # ── Application ───────────────────────────────────────────────────
+      - key: REPORTING_TIMEZONE
+        value: Asia/Kolkata
+      - key: PUBLIC_FORM_RATE_LIMIT
+        value: 20/minute;200/hour
+      - key: LOGIN_RATE_LIMIT
+        value: 10/minute;100/hour
+
+      # ── Email ─────────────────────────────────────────────────────────
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURITY
+        value: starttls
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: SMTP_FROM_NAME
+        value: Dvein Innovations
+      - key: SMTP_REPLY_TO
+        sync: false
+
+      # ── Scheduled sending ─────────────────────────────────────────────
+      # The cron below calls the CLI in-process, so no HTTP token is needed
+      # for it. AUTOMATION_TOKEN only matters if something external POSTs
+      # /api/v1/automation/run as well.
+      - key: AUTOMATION_ENABLED
+        value: "false"
+      - key: AUTOMATION_MAX_PER_RUN
+        value: "25"
+      - key: AUTOMATION_TOKEN
+        sync: false
+
+  # Offer letters and certificates that have fallen due. Runs the same code
+  # the console does, so an automatic document is identical to a hand-sent one.
+  #
+  # Reads its own copy of the environment — a cron service does not inherit the
+  # web service's. Keep AUTOMATION_ENABLED in step across both, and run
+  # `python -m app.cli automation` (without --send) once by hand before
+  # switching it on: it prints exactly who would be mailed.
+  - type: cron
+    name: dvein-documents
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    region: singapore
+    schedule: "0 9 * * *"
+    dockerCommand: python -m app.cli automation --send
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: FIREBASE_PROJECT_ID
+        value: dvein-hrm
+      - key: FIREBASE_STORAGE_BUCKET
+        value: dvein-hrm.firebasestorage.app
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: REPORTING_TIMEZONE
+        value: Asia/Kolkata
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURITY
+        value: starttls
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: SMTP_FROM_NAME
+        value: Dvein Innovations
+      - key: AUTOMATION_ENABLED
+        value: "false"
+      - key: AUTOMATION_MAX_PER_RUN
+        value: "25"

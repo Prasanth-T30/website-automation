@@ -45,6 +45,45 @@ class _EmulatorCredential(credentials.Base):
 
 
 @lru_cache
+def _service_account_from_value(raw: str) -> dict:
+    """Parse a service account supplied as an environment variable.
+
+    Accepts the raw JSON, or a base64 copy of it. The base64 form exists
+    because several dashboards fold or strip newlines in multi-line values,
+    which corrupts the PEM private key inside the JSON and produces an
+    "Invalid private key" error a long way from its cause.
+    """
+    import base64
+    import binascii
+    import json
+
+    text = raw.strip()
+    if not text.startswith("{"):
+        try:
+            text = base64.b64decode(text, validate=True).decode("utf-8")
+        except (binascii.Error, UnicodeDecodeError) as exc:
+            raise ValueError(
+                "FIREBASE_SERVICE_ACCOUNT_JSON is neither JSON nor valid base64."
+            ) from exc
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON: {exc}") from exc
+
+    missing = {"type", "project_id", "private_key", "client_email"} - parsed.keys()
+    if missing:
+        raise ValueError(
+            f"FIREBASE_SERVICE_ACCOUNT_JSON is missing {sorted(missing)}. "
+            "Use the whole service-account key file, not a fragment of it."
+        )
+    # A key pasted through a single-line field arrives with literal backslash-n
+    # instead of newlines, which the PEM parser rejects.
+    escaped_newline = chr(92) + "n"
+    if escaped_newline in parsed["private_key"]:
+        parsed["private_key"] = parsed["private_key"].replace(escaped_newline, "\n")
+    return parsed
+
+
 def get_app() -> firebase_admin.App:
     if firebase_admin._apps:  # already initialised (e.g. by an earlier import)
         return firebase_admin.get_app()
@@ -67,6 +106,18 @@ def get_app() -> firebase_admin.App:
     if settings.firebase_service_account_path:
         cred = credentials.Certificate(str(settings.firebase_service_account_path))
         return firebase_admin.initialize_app(cred, options)
+
+    if settings.firebase_service_account_json:
+        # Same credential supplied as a value instead of a file. Hosts outside
+        # GCP (Render, Railway, Fly) have no ambient identity for the Admin SDK
+        # to find and often no persistent disk to put a key file on, so the
+        # only way in is an environment variable.
+        return firebase_admin.initialize_app(
+            credentials.Certificate(_service_account_from_value(
+                settings.firebase_service_account_json
+            )),
+            options,
+        )
 
     if settings.firestore_emulator_host or settings.firebase_storage_emulator_host:
         return firebase_admin.initialize_app(_EmulatorCredential(), options)
