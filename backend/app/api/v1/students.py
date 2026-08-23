@@ -8,8 +8,9 @@ the only role that can move a student from one HR to another.
 
 from __future__ import annotations
 
+import dataclasses
 import io
-import uuid
+from datetime import date
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
@@ -29,9 +30,14 @@ from app.api.deps import (
 from app.models.student import Student
 from app.models.user import UserRole
 from app.schemas.student import (
+    CertificateCandidate,
+    CertificateDraft,
+    CertificateFields,
     CertificateIssueRequest,
     CertificateIssueResult,
     OfferCandidate,
+    OfferLetterDraft,
+    OfferLetterFields,
     OfferLetterRequest,
     OfferLetterResult,
     StudentCreate,
@@ -40,11 +46,11 @@ from app.schemas.student import (
     StudentReassignResult,
     StudentUpdate,
 )
-from app.services import activity, email
+from app.services import activity, documents, email
+from app.services.documents import offer_letter_fields as _offer_letter_fields
 from app.services.pdf_certificate import (
     build_certificate_pdf,
     certificate_filename,
-    certificate_number,
 )
 from app.services.pdf_offer_letter import (
     build_offer_letter_pdf,
@@ -349,12 +355,165 @@ def reassign_student(
     )
 
 
+# How close to the end of a programme the certificate becomes available. An
+# HR should be preparing it as the internship winds down, not after
+# remembering to tick "completed" some weeks later.
+CERTIFICATE_WINDOW_DAYS = 5
+
+
+def _programme_end_date(
+    student: Student, batches: BatchRepo, applications: ApplicationRepo
+) -> str | None:
+    """When this student's programme finishes.
+
+    The batch is the authority when there is one - a cohort's dates can be
+    moved after enrolment, and the certificate should follow the reality. A
+    student who was never assigned falls back to the dates they registered
+    for, and one with neither simply has no end date to go on.
+    """
+    if student.batch_id:
+        batch = batches.get(student.batch_id)
+        if batch and batch.end_date:
+            return str(batch.end_date)
+    if student.application_id:
+        source = applications.get(student.application_id)
+        if source and source.end_date:
+            return str(source.end_date)
+    return None
+
+
+def _days_remaining(end_date: str | None) -> int | None:
+    """Days until the programme ends; negative once it has. None if unparseable.
+
+    Dates arrive as whatever was stored, and older records hold formats a
+    parser refuses - an unreadable date means "cannot tell", never "due today".
+    """
+    if not end_date:
+        return None
+    try:
+        return (date.fromisoformat(str(end_date)[:10]) - date.today()).days
+    except ValueError:
+        return None
+
+
+def _certificate_student(student: Student, overrides: CertificateFields | None) -> Student:
+    """The student as this certificate should describe them.
+
+    A copy, never the stored record: a spelling fixed for one certificate must
+    not rewrite the enrolment behind it.
+    """
+    if overrides is None:
+        return student
+    edits = {k: v for k, v in overrides.model_dump(exclude_none=True).items() if v != ""}
+    return dataclasses.replace(student, **edits) if edits else student
+
+
+@router.get("/certificate/candidates", response_model=list[CertificateCandidate])
+def certificate_candidates(
+    students: StudentRepo,
+    batches: BatchRepo,
+    applications: ApplicationRepo,
+    reports: ReportRepo,
+    user: ActiveUser,
+    within_days: int = Query(
+        CERTIFICATE_WINDOW_DAYS, ge=0, le=365,
+        description="How near the end of the programme counts as due.",
+    ),
+) -> list[CertificateCandidate]:
+    """Students whose certificate is due, or falls due within `within_days`.
+
+    Scoped like every other list: an HR sees their own, an admin everyone's.
+    Anyone already marked completed is included regardless of dates - the
+    programme is over for them however the calendar reads.
+    """
+    scope = None if user.role is UserRole.admin else user.id
+    issued_for = {r.student_id for r in reports.list_all(category="certificate") if r.student_id}
+
+    rows = []
+    for student in students.list_all(owner_id=scope):
+        if student.status == "dropped":
+            continue
+        end_date = _programme_end_date(student, batches, applications)
+        remaining = _days_remaining(end_date)
+        due = student.status == "completed" or (
+            remaining is not None and remaining <= within_days
+        )
+        if not due:
+            continue
+        rows.append(
+            CertificateCandidate(
+                id=student.id,
+                name=student.name,
+                email=student.email,
+                college=student.college,
+                category=student.category,
+                domain=student.domain,
+                duration=student.duration,
+                status=student.status,
+                end_date=end_date,
+                days_remaining=remaining,
+                already_issued=student.id in issued_for,
+            )
+        )
+    # Not yet sent first, then the most overdue: the work to do, in order.
+    return sorted(
+        rows,
+        key=lambda r: (r.already_issued, r.days_remaining if r.days_remaining is not None else 999),
+    )
+
+
+@router.get("/{student_id}/certificate/draft", response_model=CertificateDraft)
+def certificate_draft(
+    student_id: str,
+    students: StudentRepo,
+    user: ActiveUser,
+) -> CertificateDraft:
+    """What the console opens the certificate editor with."""
+    student = _get_or_404(students, student_id)
+    _require_owner_or_admin(student, user)
+
+    return CertificateDraft(
+        subject=f"{email.CERTIFICATE_SUBJECT} — {student.domain}",
+        body=email.completion_body_text(name=student.name),
+        fields=CertificateFields(
+            name=student.name, category=student.category, domain=student.domain
+        ),
+    )
+
+
+@router.post("/{student_id}/certificate/preview")
+def preview_edited_certificate(
+    student_id: str,
+    data: CertificateIssueRequest,
+    students: StudentRepo,
+    batches: BatchRepo,
+    user: ActiveUser,
+) -> StreamingResponse:
+    """Render the certificate with the HR's corrections, without issuing it.
+
+    A POST rather than a GET with query parameters: the corrections carry a
+    student's name, which has no business in a URL every proxy along the way
+    will keep.
+    """
+    student = _get_or_404(students, student_id)
+    _require_owner_or_admin(student, user)
+
+    awardee = _certificate_student(student, data.fields)
+    batch = batches.get(student.batch_id) if student.batch_id else None
+    return StreamingResponse(
+        io.BytesIO(build_certificate_pdf(awardee, batch)),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{certificate_filename(awardee)}"'},
+    )
+
+
 @router.post("/{student_id}/certificate", response_model=CertificateIssueResult)
 def issue_certificate(
     student_id: str,
     data: CertificateIssueRequest,
     students: StudentRepo,
     batches: BatchRepo,
+    applications: ApplicationRepo,
     reports: ReportRepo,
     storage: Storage,
     activity_repo: ActivityRepo,
@@ -371,60 +530,37 @@ def issue_certificate(
     student = _get_or_404(students, student_id)
     _require_owner_or_admin(student, user)
 
+    # Being marked completed is one way to qualify; the programme actually
+    # being over (or within days of it) is the other. Requiring the flag meant
+    # a certificate could not be prepared until someone remembered to set it.
     if student.status != "completed":
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail="Mark the student as completed before issuing a certificate.",
-        )
+        remaining = _days_remaining(_programme_end_date(student, batches, applications))
+        if remaining is None or remaining > CERTIFICATE_WINDOW_DAYS:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"{student.name}'s programme is not finished yet. Mark them completed, "
+                    f"or wait until it is within {CERTIFICATE_WINDOW_DAYS} days of ending."
+                ),
+            )
 
-    batch = batches.get(student.batch_id) if student.batch_id else None
-    pdf_bytes = build_certificate_pdf(student, batch)
-    filename = certificate_filename(student)
-
-    # Filed under Documents so it survives as a record of what was sent, and
-    # can be re-downloaded without regenerating (and thus without the issue
-    # date silently moving to today).
-    stored_filename = f"{uuid.uuid4().hex}.pdf"
-    storage.upload(
-        stored_filename=stored_filename,
-        content=pdf_bytes,
-        content_type="application/pdf",
-    )
-    report = reports.create(
-        title=f"Completion Certificate — {student.name}",
-        category="certificate",
-        student_id=student.id,
-        stored_filename=stored_filename,
-        original_filename=filename,
-        content_type="application/pdf",
-        file_size_bytes=len(pdf_bytes),
-        uploaded_by_id=user.id,
-    )
-
-    email_sent = email.send_email(
-        to_email=student.email,
-        subject=data.subject or f"Your completion certificate — {student.domain}",
-        body_html=email.render_completion_body(student, data.body or None),
-        pdf_bytes=pdf_bytes,
-        pdf_filename=filename,
-    )
-
-    activity.record(
-        activity_repo,
-        action="student.certificate_issued",
+    result = documents.issue_certificate(
+        student=student,
+        awardee=_certificate_student(student, data.fields),
+        batch=batches.get(student.batch_id) if student.batch_id else None,
+        subject=data.subject or None,
+        body=data.body or None,
+        storage=storage,
+        reports=reports,
+        activity_repo=activity_repo,
         actor_id=user.id,
-        entity_type="student",
-        entity_id=student.id,
-        summary=f"Issued certificate {certificate_number(student)} to {student.name}",
-        meta={"email_sent": email_sent, "report_id": report.id},
     )
-
     return CertificateIssueResult(
-        report_id=report.id,
-        certificate_number=certificate_number(student),
-        filename=filename,
-        email_sent=email_sent,
-        emailed_to=student.email,
+        report_id=result.report_id,
+        certificate_number=result.certificate_number,
+        filename=result.filename,
+        email_sent=result.email_sent,
+        emailed_to=result.emailed_to,
     )
 
 
@@ -493,25 +629,72 @@ def offer_letter_candidates(
     return sorted(rows, key=lambda r: (r.already_issued, r.name.lower()))
 
 
-def _offer_letter_fields(student: Student, applications: ApplicationRepo) -> dict:
-    """Assemble what the letter needs from the student and their application.
+def _as_text(value) -> str | None:
+    """Dates reach the console as the strings the letter prints."""
+    return None if value is None else str(value)
 
-    Salutation and the programme dates live on the application, not the
-    student, so a manually-entered student legitimately has neither. The
-    renderer omits whatever is missing rather than inventing it.
+
+@router.get("/{student_id}/offer-letter/draft", response_model=OfferLetterDraft)
+def offer_letter_draft(
+    student_id: str,
+    students: StudentRepo,
+    applications: ApplicationRepo,
+    user: ActiveUser,
+) -> OfferLetterDraft:
+    """What the console opens the editor with: the letter's current field
+    values, and the covering email as the template would have written it.
+
+    The body comes back as plain text so an HR edits prose rather than markup,
+    and it is the template's own copy — editing one sentence does not cost
+    them the rest of the letter.
     """
-    source = applications.get(student.application_id) if student.application_id else None
-    return {
-        "name": student.name,
-        "salutation": source.title if source else None,
-        "college": student.college,
-        "place": student.place,
-        "category": student.category,
-        "domain": student.domain,
-        "duration": student.duration,
-        "start_date": source.start_date if source else None,
-        "end_date": source.end_date if source else None,
-    }
+    student = _get_or_404(students, student_id)
+    _require_owner_or_admin(student, user)
+
+    fields = _offer_letter_fields(student, applications)
+    return OfferLetterDraft(
+        subject=email.OFFER_SUBJECT,
+        body=email.offer_body_text(
+            name=fields["name"],
+            salutation=fields["salutation"],
+            category=fields["category"],
+            duration_text=offer_duration_phrase(
+                fields["duration"], fields["category"]
+            ).title(),
+        ),
+        fields=OfferLetterFields(**{k: _as_text(v) for k, v in fields.items()}),
+    )
+
+
+@router.post("/{student_id}/offer-letter/preview")
+def preview_edited_offer_letter(
+    student_id: str,
+    data: OfferLetterRequest,
+    students: StudentRepo,
+    applications: ApplicationRepo,
+    user: ActiveUser,
+) -> StreamingResponse:
+    """Render the letter with the HR's edits applied, without issuing it.
+
+    A POST rather than a GET with query parameters: the edits carry a
+    student's name and college, which have no business sitting in a URL that
+    every proxy and access log along the way will keep.
+    """
+    student = _get_or_404(students, student_id)
+    _require_owner_or_admin(student, user)
+
+    pdf_bytes = build_offer_letter_pdf(
+        **_offer_letter_fields(student, applications, data.fields)
+    )
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'inline; filename="{offer_letter_filename(student.name)}"'
+            )
+        },
+    )
 
 
 @router.get("/{student_id}/offer-letter")
@@ -574,57 +757,19 @@ def issue_offer_letter(
             detail=f"{student.name} has not paid anything yet, so no offer letter is due.",
         )
 
-    fields = _offer_letter_fields(student, applications)
-    pdf_bytes = build_offer_letter_pdf(**fields)
-    filename = offer_letter_filename(student.name)
-
-    # Filed under Documents so it survives as a record of what was sent, and
-    # can be re-downloaded without regenerating (and thus without the letter
-    # date silently moving to today).
-    stored_filename = f"{uuid.uuid4().hex}.pdf"
-    storage.upload(
-        stored_filename=stored_filename,
-        content=pdf_bytes,
-        content_type="application/pdf",
-    )
-    report = reports.create(
-        title=f"Offer Letter — {student.name}",
-        category="offer_letter",
-        student_id=student.id,
-        stored_filename=stored_filename,
-        original_filename=filename,
-        content_type="application/pdf",
-        file_size_bytes=len(pdf_bytes),
-        uploaded_by_id=user.id,
-    )
-
-    email_sent = email.send_email(
-        to_email=student.email,
-        subject=data.subject or email.OFFER_SUBJECT,
-        body_html=email.render_offer_body(
-            name=student.name,
-            salutation=fields["salutation"],
-            category=student.category,
-            duration_text=offer_duration_phrase(student.duration, student.category).title(),
-            custom_body=data.body or None,
-        ),
-        pdf_bytes=pdf_bytes,
-        pdf_filename=filename,
-    )
-
-    activity.record(
-        activity_repo,
-        action="student.offer_letter_issued",
+    result = documents.issue_offer_letter(
+        student=student,
+        fields=_offer_letter_fields(student, applications, data.fields),
+        subject=data.subject or None,
+        body=data.body or None,
+        storage=storage,
+        reports=reports,
+        activity_repo=activity_repo,
         actor_id=user.id,
-        entity_type="student",
-        entity_id=student.id,
-        summary=f"Issued offer letter to {student.name}",
-        meta={"email_sent": email_sent, "report_id": report.id},
     )
-
     return OfferLetterResult(
-        report_id=report.id,
-        filename=filename,
-        email_sent=email_sent,
-        emailed_to=student.email,
+        report_id=result.report_id,
+        filename=result.filename,
+        email_sent=result.email_sent,
+        emailed_to=result.emailed_to,
     )

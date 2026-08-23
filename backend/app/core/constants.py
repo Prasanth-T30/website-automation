@@ -7,6 +7,7 @@ actual programme categories and domains, not an invented list.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 TITLE_CHOICES = ["Mr.", "Ms.", "Mrs.", "Dr."]
 
@@ -184,6 +185,23 @@ DURATION_CHOICES = ["15 Days", "30 Days", "45 Days", "60 Days", "90 Days"]
 MODE_CHOICES = ["Online", "Offline"]
 
 YEAR_CHOICES = ["1st Year", "2nd Year", "3rd Year", "4th Year", "Final Year"]
+
+
+def passed_out_year_choices() -> list[str]:
+    """Graduation years offered on the public form.
+
+    Computed from the current year rather than written down: a hardcoded list
+    starts refusing next year's graduates the moment the calendar turns, and
+    nobody notices until an applicant cannot complete the form.
+
+    The range has to cover both people the form serves. Five years forward
+    reaches a first-year student who has not graduated yet; twenty-five back
+    reaches the working professionals who register for the upskilling
+    programmes, and who would otherwise find their own year missing from the
+    list with no way to proceed.
+    """
+    this_year = datetime.now(UTC).year
+    return [str(y) for y in range(this_year + 5, this_year - 26, -1)]
 
 APPLICATION_STATUS_PENDING = "pending"
 APPLICATION_STATUS_CLAIMED = "claimed"

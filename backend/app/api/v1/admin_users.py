@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.deps import ActivityRepo, AdminUser, UserRepo
+from app.api.deps import ActivityRepo, AdminUser, StudentRepo, UserRepo
 from app.core.security import generate_password, hash_password
 from app.models.user import User, UserRole
 from app.repositories.users import EmailAlreadyExists
@@ -137,7 +137,11 @@ def reset_password(
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
-    user_id: str, users: UserRepo, activity_repo: ActivityRepo, admin: AdminUser
+    user_id: str,
+    users: UserRepo,
+    students: StudentRepo,
+    activity_repo: ActivityRepo,
+    admin: AdminUser,
 ) -> None:
     user = _get_user_or_404(users, user_id)
 
@@ -150,6 +154,27 @@ def delete_user(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail="At least one active administrator must remain.",
+        )
+
+    # Deleting an HR who still holds students strands them: the records keep
+    # an owner_id pointing at an account that no longer exists, so they drop
+    # out of every per-HR view while their payments stay in the institute
+    # ledger. The admin's own revenue breakdown then quietly stops adding up
+    # to the total, with nothing on screen to say why.
+    #
+    # Refused rather than silently reassigned — moving someone else's students
+    # to an arbitrary owner is not a decision this endpoint should make on the
+    # admin's behalf. /students/{id}/reassign already moves a student together
+    # with their payment history and originating application.
+    owned = students.list_all(owner_id=user.id)
+    if owned:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=(
+                f"{user.full_name} still owns {len(owned)} student"
+                f"{'s' if len(owned) != 1 else ''}. Reassign them to another HR "
+                f"first, or deactivate this account instead of deleting it."
+            ),
         )
 
     users.delete(user.id)

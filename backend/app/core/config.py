@@ -98,6 +98,18 @@ class Settings(BaseSettings):
     rate_limit_storage_uri: str = ""
 
     # ── Seed accounts ─────────────────────────────────────────────────────
+    # ── Scheduled document sending ────────────────────────────────────────
+    # Off unless deliberately switched on: this sends real mail to real
+    # students with nobody reviewing it first, so deploying the code must not
+    # be enough to start it.
+    automation_enabled: bool = False
+    # A run will not send more than this. A bad query or a bulk import cannot
+    # become hundreds of emails before anyone notices.
+    automation_max_per_run: int = 25
+    # Shared secret for the scheduler that calls the run endpoint. Without one
+    # set, only a signed-in admin can trigger a run.
+    automation_token: str | None = None
+
     seed_admin_email: str = "admin@dvein.in"
     seed_admin_password: str | None = None
     seed_hr_password: str | None = None
@@ -154,7 +166,9 @@ class Settings(BaseSettings):
             return None
         return v
 
-    @field_validator("smtp_host", "smtp_username", "smtp_password", mode="before")
+    @field_validator(
+        "smtp_host", "smtp_username", "smtp_password", "automation_token", mode="before"
+    )
     @classmethod
     def _blank_smtp_field_to_none(cls, v: object) -> object:
         """`SMTP_HOST=` (unset in .env.example) must mean "not configured",
@@ -177,6 +191,22 @@ class Settings(BaseSettings):
                 "discard such cookies, leaving sessions that appear to work "
                 "and then silently fail."
             )
+
+        if bool(self.smtp_username) != bool(self.smtp_password):
+            raise ValueError("SMTP_USERNAME and SMTP_PASSWORD must be configured together")
+
+        if self.smtp_host and self.smtp_host.lower() == "smtp.gmail.com":
+            if self.smtp_security == "starttls" and self.smtp_port != 587:
+                raise ValueError("Gmail STARTTLS must use SMTP_PORT=587")
+            if self.smtp_security == "ssl" and self.smtp_port != 465:
+                raise ValueError("Gmail SSL must use SMTP_PORT=465")
+            if self.smtp_security == "none":
+                raise ValueError("Gmail SMTP requires STARTTLS or SSL")
+            if self.smtp_password:
+                compact_password = "".join(self.smtp_password.split())
+                if len(compact_password) != 16:
+                    raise ValueError("Gmail SMTP_PASSWORD must be a 16-character App Password")
+                self.smtp_password = compact_password
         return self
 
     @property

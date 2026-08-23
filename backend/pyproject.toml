@@ -24,11 +24,39 @@ dependencies = [
     "tzdata>=2024.1",
 ]
 
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# Declared rather than auto-discovered. Left to itself, setuptools scans the
+# directory and refuses to build the moment it finds a second top-level folder
+# alongside `app` — `var/` already triggers exactly that:
+#
+#   error: Multiple top-level packages discovered in a flat-layout: ['app', 'var']
+#
+# The Dockerfile happens to dodge it by running `pip install .` when only
+# pyproject.toml has been copied in, so nothing is discovered and the build
+# quietly succeeds. That is a coincidence of COPY ordering, not a design:
+# reordering those two lines, or anyone running `pip install .` from a full
+# checkout, brings the error straight back. Naming the package removes the
+# scan and with it the trap.
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+# The letterhead, certificate background, signature and email logo are code
+# dependencies, not decoration: offer letters, certificates and outgoing mail
+# all fail at runtime without them. A wheel excludes non-Python files unless
+# told otherwise, so without this the installed package looks complete and
+# then raises a missing-file error the first time an HR sends a letter.
+[tool.setuptools.package-data]
+app = ["assets/*"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",
     "httpx>=0.28",
+    "pymupdf>=1.24",
     "ruff>=0.8",
 ]
 

@@ -120,6 +120,23 @@ def get_current_user(request: Request, users: UserRepo) -> User:
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
+def get_optional_user(request: Request, users: UserRepo) -> User | None:
+    """The signed-in user, or None — never a 401.
+
+    For the one endpoint a machine may call without a session. Everything
+    else should demand a user; this exists so an unauthenticated caller
+    reaches the endpoint's own authorisation rather than being turned away
+    before it can offer a token.
+    """
+    try:
+        return get_current_user(request, users)
+    except HTTPException:
+        return None
+
+
+OptionalUser = Annotated[User | None, Depends(get_optional_user)]
+
+
 def require_password_current(user: CurrentUser) -> User:
     """Block normal API use while a forced password change is outstanding.
 

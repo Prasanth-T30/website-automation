@@ -23,6 +23,16 @@ services:
       FIREBASE_STORAGE_EMULATOR_HOST: ${FIREBASE_STORAGE_EMULATOR_HOST:-host.docker.internal:9199}
       # Monthly revenue is bucketed on this clock, not UTC.
       REPORTING_TIMEZONE: ${REPORTING_TIMEZONE:-Asia/Kolkata}
+      # Outbound approval/rejection mail. Compose reads these from the ignored
+      # root .env file; the image itself never contains the app password.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURITY: ${SMTP_SECURITY:-starttls}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-info@dveininnovation.com}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Dvein Innovations}
+      SMTP_REPLY_TO: ${SMTP_REPLY_TO:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -30,7 +40,7 @@ services:
 
   web:
     build:
-      context: ./frontend
+      context: ./frontend/console
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     restart: unless-stopped
@@ -43,7 +53,7 @@ services:
   # the only surface strangers reach, and it ships no console code at all.
   registration:
     build:
-      context: ./registration
+      context: ./frontend/registration
       args:
         # Relative, so the browser stays same-origin and nginx proxies /api
         # through to the API service on this network.

@@ -142,3 +142,83 @@ def test_credentials_are_optional(monkeypatch):
     monkeypatch.setattr(settings, "smtp_username", "user")
     monkeypatch.setattr(settings, "smtp_password", "pass")
     assert settings.smtp_authenticates is True
+
+
+def test_readiness_check_authenticates_and_uses_noop(monkeypatch):
+    calls = []
+
+    class FakeSMTP:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def login(self, username, password):
+            calls.append(("login", username, password))
+
+        def noop(self):
+            calls.append(("noop",))
+            return 250, b"OK"
+
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(settings, "smtp_username", "sender@example.com")
+    monkeypatch.setattr(settings, "smtp_password", "test-password")
+    monkeypatch.setattr(mailer, "_connect", lambda: FakeSMTP())
+
+    ok, detail = mailer.verify_smtp_connection()
+    assert ok is True
+    assert "authentication succeeded" in detail
+    assert calls == [
+        ("login", "sender@example.com", "test-password"),
+        ("noop",),
+    ]
+
+
+def test_starttls_connection_uses_a_verified_tls_context(monkeypatch):
+    calls = []
+    tls_context = object()
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout):
+            calls.append(("connect", host, port, timeout))
+
+        def ehlo(self):
+            calls.append(("ehlo",))
+
+        def starttls(self, *, context):
+            calls.append(("starttls", context))
+
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(settings, "smtp_port", 587)
+    monkeypatch.setattr(settings, "smtp_security", "starttls")
+    monkeypatch.setattr(mailer.ssl, "create_default_context", lambda: tls_context)
+    monkeypatch.setattr(mailer.smtplib, "SMTP", FakeSMTP)
+
+    mailer._connect()
+
+    assert calls == [
+        ("connect", "smtp.example.com", 587, 20),
+        ("ehlo",),
+        ("starttls", tls_context),
+        ("ehlo",),
+    ]
+
+
+def test_ssl_connection_uses_a_verified_tls_context(monkeypatch):
+    calls = []
+    tls_context = object()
+
+    class FakeSMTPSSL:
+        def __init__(self, host, port, timeout, context):
+            calls.append((host, port, timeout, context))
+
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(settings, "smtp_port", 465)
+    monkeypatch.setattr(settings, "smtp_security", "ssl")
+    monkeypatch.setattr(mailer.ssl, "create_default_context", lambda: tls_context)
+    monkeypatch.setattr(mailer.smtplib, "SMTP_SSL", FakeSMTPSSL)
+
+    mailer._connect()
+
+    assert calls == [("smtp.example.com", 465, 20, tls_context)]

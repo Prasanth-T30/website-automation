@@ -1,0 +1,292 @@
+/* ============================================================================
+   Dvein Console — design tokens
+   ----------------------------------------------------------------------------
+   Palette follows the "Dvein HRM Console" design: a warm paper canvas under an
+   aubergine-and-violet console, with gold as the single accent metal.
+
+     brand   (#5B4BA8)  primary actions, active navigation, links
+     accent  (#A9822F)  gold — secondary emphasis, nav underline, chart metal
+     signal  (#4F7A4F)  sage — success and conversion moments
+     neutral (warm aubergine-grey) surfaces, borders, text
+     warn / danger      status only, never decoration
+
+   Text and chrome sit on an aubergine axis (#241C33) rather than a neutral
+   grey, so the warm paper canvas never reads as dirty white.
+   ========================================================================== */
+
+@import "tailwindcss";
+
+/* Theme is driven by an explicit attribute so the in-app toggle wins over the
+   OS setting; index.html stamps it before first paint to avoid a flash. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme {
+  --font-sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* Console headline face — page titles and hero copy only, never body text. */
+  --font-display: "Spectral", Georgia, serif;
+
+  /* ── brand · violet (#5B4BA8) ─────────────────────────────────────────── */
+  --color-brand-50:  #f4f1fc;
+  --color-brand-100: #eeeafa;
+  --color-brand-200: #ddd6f4;
+  --color-brand-300: #c3b4f2;
+  --color-brand-400: #9c8ae0;
+  --color-brand-500: #5b4ba8;
+  --color-brand-600: #463a86;
+  --color-brand-700: #41347a;
+  --color-brand-800: #33285f;
+  --color-brand-900: #241c3f;
+  --color-brand-950: #1b1229;
+
+  /* ── accent · gold (#A9822F) ──────────────────────────────────────────── */
+  --color-accent-50:  #fdfaf2;
+  --color-accent-100: #f7efdd;
+  --color-accent-200: #eeddb4;
+  --color-accent-300: #e0c07a;
+  --color-accent-400: #d9b466;
+  --color-accent-500: #bf9438;
+  --color-accent-600: #a9822f;
+  --color-accent-700: #86671f;
+  --color-accent-800: #654e18;
+  --color-accent-900: #33280f;
+
+  /* ── signal · sage (#4F7A4F) ──────────────────────────────────────────── */
+  --color-signal-50:  #f1f5ef;
+  --color-signal-100: #e9f0e6;
+  --color-signal-200: #cfdfc9;
+  --color-signal-300: #b0cba7;
+  --color-signal-400: #8fbb84;
+  --color-signal-500: #6a9a63;
+  --color-signal-600: #4f7a4f;
+  --color-signal-700: #3f6340;
+  --color-signal-800: #2f4a30;
+  --color-signal-900: #1c2a19;
+
+  /* ── warn · ochre ─────────────────────────────────────────────────────── */
+  --color-warn-50:  #fdf8ee;
+  --color-warn-100: #fbf0da;
+  --color-warn-300: #dfae4e;
+  --color-warn-500: #c68f22;
+  --color-warn-600: #a8761a;
+  --color-warn-700: #7d5713;
+
+  /* ── danger · brick ───────────────────────────────────────────────────── */
+  --color-danger-50:  #fdf1ef;
+  --color-danger-100: #f9e9e6;
+  --color-danger-300: #e0837a;
+  --color-danger-400: #d0655c;
+  --color-danger-500: #c24b43;
+  --color-danger-600: #a93a34;
+  --color-danger-700: #8a2f2a;
+
+  /* ── radii — badge (8px), input/button (11px), card (18px), modal (20px) ─ */
+  --radius-sm: 8px;
+  --radius-md: 11px;
+  --radius-lg: 18px;
+  --radius-xl: 20px;
+
+  /* ── elevation — tinted aubergine, never neutral black ─────────────────── */
+  --shadow-card: 0 1px 2px rgb(36 28 51 / 0.05), 0 20px 40px -30px rgb(36 28 51 / 0.42);
+  --shadow-overlay: 0 2px 4px rgb(36 28 51 / 0.06), 0 26px 50px -28px rgb(36 28 51 / 0.5);
+
+  /* Violet into gold — the mark, the avatar, and conversion moments. */
+  --gradient-brand: linear-gradient(135deg, #5b4ba8 0%, #a9822f 100%);
+}
+
+/* ============================================================================
+   Semantic layer
+   Components reference these, never the raw ramps above. Swapping a theme means
+   redefining this block — component code never changes.
+   ========================================================================== */
+
+:root {
+  --bg-canvas:      #f7f4ef;
+  --bg-surface:     #ffffff;
+  --bg-subtle:      #fbf9f5;
+  --bg-inset:       #f2eee7;
+
+  --border-subtle:  #f1ebe2;
+  --border-default: #e8e1d6;
+  --border-strong:  #d8cfc0;
+
+  --text-primary:   #241c33;
+  --text-secondary: #4e4560;
+  /* AA on all three light grounds — the white surface, the warm canvas, and
+     the violet wash the page header sits on. The old #857c93 read as a
+     pleasant grey but came in at 3.96:1, which put every hint, table meta
+     line and empty-state description below AA in the light theme. */
+  --text-muted:     #6f6880;
+  --text-inverted:  #faf8f4;
+
+  --brand:          var(--color-brand-500);
+  --brand-hover:    var(--color-brand-600);
+  --brand-subtle:   var(--color-brand-100);
+  --brand-text:     var(--color-brand-700);
+  --on-brand:       #ffffff;
+
+  --accent:         var(--color-accent-600);
+  --accent-subtle:  var(--color-accent-100);
+
+  /* Text sits a step darker than the fill it labels so badges clear AA. */
+  --success:        var(--color-signal-600);
+  --success-subtle: var(--color-signal-100);
+  --success-text:   var(--color-signal-700);
+
+  --warn:           var(--color-warn-600);
+  --warn-subtle:    var(--color-warn-100);
+  --warn-text:      var(--color-warn-700);
+
+  --danger:         var(--color-danger-600);
+  --danger-subtle:  var(--color-danger-100);
+  --danger-text:    var(--color-danger-600);
+  --on-danger:      #ffffff;
+
+  --focus-ring:     var(--color-brand-500);
+
+  --elevation-1: var(--shadow-card);
+  --elevation-2: var(--shadow-overlay);
+
+  /* Registration-form categories, on the same three tones the badges use:
+     Internship → brand, Course → sage, Project → ochre. */
+  --category-internship-bg:   var(--color-brand-100);
+  --category-internship-text: var(--color-brand-700);
+  --category-course-bg:       var(--color-signal-100);
+  --category-course-text:     var(--color-signal-700);
+  --category-project-bg:      var(--color-warn-100);
+  --category-project-text:    var(--color-warn-700);
+
+  /* The barely-there violet bloom at the top of the console content area. */
+  --shell-wash: radial-gradient(900px 420px at 50% -180px, #efeafa 0%, #f7f4ef 62%);
+}
+
+/* Dark is a genuine re-grade, not an inversion: surfaces lift as they come
+   forward, and the brand steps lighter so it keeps AA contrast on dark ground. */
+:root[data-theme="dark"] {
+  --bg-canvas:      #0d0a16;
+  --bg-surface:     #161125;
+  --bg-subtle:      #1b1530;
+  --bg-inset:       #221a3a;
+
+  --border-subtle:  #221a38;
+  --border-default: #2b2246;
+  --border-strong:  #3d3160;
+
+  --text-primary:   #efeaf7;
+  --text-secondary: #b8afcd;
+  --text-muted:     #8a80a3;
+  --text-inverted:  #150f26;
+
+  --brand:          var(--color-brand-400);
+  --brand-hover:    #b6a6ee;
+  --brand-subtle:   #231b40;
+  --brand-text:     var(--color-brand-300);
+  /* Dark's brand is a light violet, so its ink is dark, not white: 6.1:1
+     against the fill, where #ffffff managed 2.95:1. */
+  --on-brand:       #1b1229;
+
+  --accent:         var(--color-accent-400);
+  --accent-subtle:  var(--color-accent-900);
+
+  --success:        var(--color-signal-400);
+  --success-subtle: var(--color-signal-900);
+  --success-text:   var(--color-signal-300);
+
+  --warn:           var(--color-warn-300);
+  --warn-subtle:    #33270c;
+  --warn-text:      var(--color-warn-300);
+
+  --danger:         var(--color-danger-300);
+  --danger-subtle:  #33161a;
+  --danger-text:    var(--color-danger-300);
+  --on-danger:      #2a1113;
+
+  --focus-ring:     var(--color-brand-400);
+
+  --elevation-1: 0 1px 2px rgb(0 0 0 / 0.5), 0 24px 44px -30px rgb(0 0 0 / 0.8);
+  --elevation-2: 0 2px 6px rgb(0 0 0 / 0.55), 0 30px 56px -28px rgb(0 0 0 / 0.85);
+
+  --category-internship-bg:   #231b40;
+  --category-internship-text: var(--color-brand-300);
+  --category-course-bg:       var(--color-signal-900);
+  --category-course-text:     var(--color-signal-300);
+  --category-project-bg:      #33270c;
+  --category-project-text:    var(--color-warn-300);
+
+  --shell-wash: radial-gradient(900px 420px at 50% -180px, #1a1330 0%, #0d0a16 62%);
+}
+
+/* Dvein's admin chrome (top console header + tab bar) is the darkest step of
+   the brand ramp rather than a neutral — it reads as the same material as the
+   login hero. Unlike the old fixed navy, it re-grades with the theme so a dark
+   console doesn't leave a lighter bar floating above it. */
+:root {
+  --chrome-bg:      #1b1229;
+  --chrome-bg-2:    #2b1e42;
+  --chrome-border:  #33254c;
+  --chrome-text:    #a99cc0;
+  --chrome-text-hover: #f2ecfa;
+}
+
+:root[data-theme="dark"] {
+  --chrome-bg:      #0a0713;
+  --chrome-bg-2:    #150f26;
+  --chrome-border:  #241b3c;
+  --chrome-text:    #9d92b5;
+  --chrome-text-hover: #f2ecfa;
+}
+
+/* Expose the semantic layer to Tailwind so `bg-surface`, `text-fg-muted`,
+   `border-line`, `shadow-e1` etc. resolve as ordinary utilities that follow the
+   active theme automatically. */
+@theme inline {
+  --color-canvas:  var(--bg-canvas);
+  --color-surface: var(--bg-surface);
+  --color-subtle:  var(--bg-subtle);
+  --color-inset:   var(--bg-inset);
+
+  --color-line:        var(--border-default);
+  --color-line-subtle: var(--border-subtle);
+  --color-line-strong: var(--border-strong);
+
+  --color-fg:           var(--text-primary);
+  --color-fg-secondary: var(--text-secondary);
+  --color-fg-muted:     var(--text-muted);
+  --color-fg-inverted:  var(--text-inverted);
+
+  --color-brand:        var(--brand);
+  --color-brand-hover:  var(--brand-hover);
+  --color-brand-subtle: var(--brand-subtle);
+  --color-brand-text:   var(--brand-text);
+  --color-on-brand:     var(--on-brand);
+
+  --color-accent:        var(--accent);
+  --color-accent-subtle: var(--accent-subtle);
+
+  --color-success:        var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-success-text:   var(--success-text);
+  --color-warn:           var(--warn);
+  --color-warn-subtle:    var(--warn-subtle);
+  --color-warn-text:      var(--warn-text);
+  --color-danger:         var(--danger);
+  --color-danger-subtle:  var(--danger-subtle);
+  --color-danger-text:    var(--danger-text);
+  --color-on-danger:      var(--on-danger);
+
+  --color-category-internship-bg:   var(--category-internship-bg);
+  --color-category-internship-text: var(--category-internship-text);
+  --color-category-course-bg:       var(--category-course-bg);
+  --color-category-course-text:     var(--category-course-text);
+  --color-category-project-bg:      var(--category-project-bg);
+  --color-category-project-text:    var(--category-project-text);
+
+  --color-chrome:            var(--chrome-bg);
+  --color-chrome-2:          var(--chrome-bg-2);
+  --color-chrome-border:     var(--chrome-border);
+  --color-chrome-text:       var(--chrome-text);
+  --color-chrome-text-hover: var(--chrome-text-hover);
+
+  --shadow-e1: var(--elevation-1);
+  --shadow-e2: var(--elevation-2);
+}

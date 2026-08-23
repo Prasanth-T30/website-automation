@@ -5,7 +5,7 @@ trip, and fail loudly — with a non-zero exit — when it cannot connect.
 
 from __future__ import annotations
 
-from app.cli import check
+from app.cli import check, smtp_check, smtp_test
 from app.core.config import settings
 from tests.conftest import requires_emulator
 
@@ -40,6 +40,40 @@ def test_fails_and_exits_non_zero_when_firestore_is_unreachable(monkeypatch, cap
     out = capsys.readouterr().out
     assert "FAILED" in out
     assert "Not ready" in out
+
+
+def test_smtp_check_reports_success_without_exposing_the_password(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
+    monkeypatch.setattr(settings, "smtp_username", "sender@example.com")
+    monkeypatch.setattr(settings, "smtp_password", "do-not-print-this")
+    monkeypatch.setattr(
+        "app.services.email.verify_smtp_connection",
+        lambda: (True, "TLS connection and authentication succeeded"),
+    )
+
+    assert smtp_check() == 0
+    out = capsys.readouterr().out
+    assert "SMTP           : OK" in out
+    assert "do-not-print-this" not in out
+
+
+def test_smtp_test_sends_one_labelled_message_to_the_sender(monkeypatch, capsys):
+    delivered = []
+    monkeypatch.setattr(settings, "smtp_username", "sender@example.com")
+    monkeypatch.setattr(
+        "app.services.email.verify_smtp_connection",
+        lambda: (True, "TLS connection and authentication succeeded"),
+    )
+    monkeypatch.setattr(
+        "app.services.email.send_email",
+        lambda **message: delivered.append(message) or True,
+    )
+
+    assert smtp_test() == 0
+    assert len(delivered) == 1
+    assert delivered[0]["to_email"] == "sender@example.com"
+    assert "SMTP verification" in delivered[0]["subject"]
+    assert "Delivery       : SENT" in capsys.readouterr().out
 
 
 @requires_emulator

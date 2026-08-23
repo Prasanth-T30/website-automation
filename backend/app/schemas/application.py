@@ -7,7 +7,7 @@ institute's actual intake form, not an invented one.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -53,6 +53,34 @@ class ApplicationCreate(BaseModel):
     # Optional note from the applicant. Bounded so the public form cannot be
     # used to write unbounded data into the database.
     other: str | None = Field(default=None, max_length=1000)
+    # Native town/district, and the year of passing out. Optional so the
+    # older deployed form — which does not collect either — keeps submitting.
+    native_place: str | None = Field(default=None, max_length=100)
+    passed_out_year: str | None = None
+
+    @field_validator("native_place")
+    @classmethod
+    def _clean_native_place(cls, v: str | None) -> str | None:
+        return v.strip() or None if v else None
+
+    @field_validator("passed_out_year")
+    @classmethod
+    def _validate_passed_out_year(cls, v: str | None) -> str | None:
+        """Kept as a string to match `year`, but it has to *be* a year.
+
+        Validating the range rather than the exact option list means a form
+        cached in someone's browser over a new year still submits, while
+        free-typed nonsense in a stale client is still refused.
+        """
+        if v in (None, ""):
+            return None
+        v = str(v).strip()
+        if not (v.isdigit() and len(v) == 4):
+            raise ValueError("Year of passing out must be a four-digit year")
+        this_year = datetime.now(UTC).year
+        if not (this_year - 30) <= int(v) <= (this_year + 10):
+            raise ValueError("Enter a realistic year of passing out")
+        return v
 
     @field_validator("mode")
     @classmethod
@@ -148,6 +176,8 @@ class ApplicationOut(BaseModel):
     mode: str | None = None
     project_topic: str | None = None
     other: str | None = None
+    native_place: str | None = None
+    passed_out_year: str | None = None
     status: str
     owner_id: str | None = None
     claimed_at: datetime | None = None
@@ -188,6 +218,7 @@ class ChoicesOut(BaseModel):
     domains: list[str]
     durations: list[str]
     years: list[str]
+    passed_out_years: list[str]
     # The same domains, carrying the blurb and tech stack each card renders.
     # `domains` stays a plain name list so existing callers keep working.
     programmes: list[ProgrammeOut] = []

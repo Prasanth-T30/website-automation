@@ -1,8 +1,7 @@
 packages:
-  - "frontend"
-  # The public registration form. Separate app, separate deploy target — it is
-  # the only surface strangers can reach, so it ships without any console code.
-  - "registration"
+  # Both browser applications live under one frontend boundary while remaining
+  # independently buildable and deployable workspaces.
+  - "frontend/*"
 allowBuilds:
   # esbuild ships prebuilt binaries and needs its install script to run.
   esbuild: true

@@ -6,7 +6,12 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-from app.core.constants import CATEGORY_CHOICES, DOMAIN_CHOICES, DURATION_CHOICES
+from app.core.constants import (
+    CATEGORY_CHOICES,
+    DOMAIN_CHOICES,
+    DURATION_CHOICES,
+    canonical_domain,
+)
 
 PAYMENT_STATUS_CHOICES = ["paid", "pending", "overdue"]
 STUDENT_STATUS_CHOICES = ["active", "completed", "dropped"]
@@ -94,6 +99,61 @@ class StudentReassign(BaseModel):
     owner_id: str = Field(min_length=1)
 
 
+class CertificateFields(BaseModel):
+    """What an HR may correct on the certificate before it is issued.
+
+    Only what actually reaches the page: the name on the rule, and the
+    category and domain that compose the programme line. Unvalidated against
+    the current choice lists for the same reason as OfferLetterFields — these
+    describe an enrolment that may predate them, nothing here is stored, and
+    the console offers the current choices as a dropdown.
+    """
+
+    name: str | None = Field(default=None, min_length=2, max_length=100)
+    category: str | None = Field(default=None, max_length=40)
+    domain: str | None = Field(default=None, max_length=120)
+
+    @field_validator("domain")
+    @classmethod
+    def _canonicalise_domain(cls, v: str | None) -> str | None:
+        if v in (None, ""):
+            return None
+        return canonical_domain(v) or v
+
+
+class CertificateCandidate(BaseModel):
+    """One student whose certificate is due, or nearly due.
+
+    Eligibility is the programme's end date rather than a status flag: an HR
+    should be preparing the certificate as the internship winds down, not
+    after remembering to tick "completed". `days_remaining` goes negative once
+    the end date has passed, which is how the console sorts the overdue ones
+    to the top.
+    """
+
+    id: str
+    name: str
+    email: str
+    college: str | None = None
+    category: str | None = None
+    domain: str | None = None
+    duration: str | None = None
+    status: str
+    # ISO date the programme ends, from the batch if assigned and the
+    # originating application otherwise. None when neither knows.
+    end_date: str | None = None
+    days_remaining: int | None = None
+    already_issued: bool = False
+
+
+class CertificateDraft(BaseModel):
+    """Everything the console needs to open an editable certificate."""
+
+    subject: str
+    body: str
+    fields: CertificateFields
+
+
 class CertificateIssueRequest(BaseModel):
     """Both optional — the defaults are generated from the student record.
 
@@ -103,6 +163,8 @@ class CertificateIssueRequest(BaseModel):
 
     subject: str = Field(default="", max_length=200)
     body: str = ""
+    # Corrections to the certificate itself, as reviewed in the preview.
+    fields: CertificateFields | None = None
 
 
 class CertificateIssueResult(BaseModel):
@@ -153,11 +215,64 @@ class StudentReassignResult(BaseModel):
     to_owner_name: str
 
 
+class OfferLetterFields(BaseModel):
+    """What an HR may change on the letter itself before it is sent.
+
+    Every field is optional, and anything left unset falls back to the
+    student's own record. Overrides apply to the one letter being generated;
+    they are not written back, so a typo fixed for a single letter cannot
+    quietly rewrite the enrolment it was taken from.
+
+    Deliberately not validated against the current choice lists. This model
+    also carries the *existing* values back to the console, and records
+    predate the lists: durations were once written "3 Months" where the form
+    now offers "90 Days". Refusing those would 500 on the letter of every
+    student enrolled before the change. Nothing here is stored — it only
+    decides what the PDF prints — so bounded length is the guarantee that
+    matters, and the console offers the current choices as a dropdown.
+    """
+
+    name: str | None = Field(default=None, min_length=2, max_length=100)
+    salutation: str | None = Field(default=None, max_length=10)
+    college: str | None = Field(default=None, max_length=150)
+    place: str | None = Field(default=None, max_length=100)
+    category: str | None = Field(default=None, max_length=40)
+    domain: str | None = Field(default=None, max_length=120)
+    duration: str | None = Field(default=None, max_length=40)
+    # Free text rather than dates: the letter prints whatever the application
+    # recorded, and older registrations hold formats a date parser refuses.
+    start_date: str | None = Field(default=None, max_length=40)
+    end_date: str | None = Field(default=None, max_length=40)
+
+    @field_validator("domain")
+    @classmethod
+    def _canonicalise_domain(cls, v: str | None) -> str | None:
+        """Translate a retired programme label to its current name, the way
+        the public form does. Anything unrecognised is left as typed."""
+        if v in (None, ""):
+            return None
+        return canonical_domain(v) or v
+
+
 class OfferLetterRequest(BaseModel):
-    """Both optional — the defaults come from the student's own record."""
+    """All optional — the defaults come from the student's own record."""
 
     subject: str = Field(default="", max_length=200)
     body: str = ""
+    # Edits to the letter itself, as reviewed in the console's preview.
+    fields: OfferLetterFields | None = None
+
+
+class OfferLetterDraft(BaseModel):
+    """Everything the console needs to open an editable offer letter.
+
+    Served as one request so the preview, the email and the letter fields can
+    never be assembled from three different reads of the same student.
+    """
+
+    subject: str
+    body: str
+    fields: OfferLetterFields
 
 
 class OfferLetterResult(BaseModel):

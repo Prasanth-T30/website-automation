@@ -12,6 +12,7 @@ from app.api.v1 import (
     applications,
     attendance,
     auth,
+    automation,
     batches,
     notifications,
     payments,
@@ -38,3 +39,4 @@ api_router.include_router(reports.router)
 api_router.include_router(notifications.router)
 api_router.include_router(announcements.router)
 api_router.include_router(settings.router)
+api_router.include_router(automation.router)

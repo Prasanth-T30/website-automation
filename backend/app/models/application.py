@@ -48,6 +48,14 @@ class Application:
     # Free text the applicant typed under "Other" on the public form —
     # anything they wanted the team to know that the form doesn't ask for.
     other: str | None = None
+    # Hometown, and the year they finish (or finished) their course. Both
+    # optional for the same reason as the rest of this block: applications
+    # taken before the form asked exist without them, and reading one back
+    # must not fail. `native_place` is distinct from `place`, which is where
+    # the applicant is living now — for a student those are usually different
+    # towns, and it is the native district the team sorts by.
+    native_place: str | None = None
+    passed_out_year: str | None = None
 
     status: str = "pending"  # pending -> claimed -> approved | rejected
     owner_id: str | None = None
@@ -90,6 +98,8 @@ class Application:
             mode=data.get("mode"),
             project_topic=data.get("project_topic"),
             other=data.get("other"),
+            native_place=data.get("native_place"),
+            passed_out_year=data.get("passed_out_year"),
             status=data.get("status", "pending"),
             owner_id=data.get("owner_id"),
             claimed_at=data.get("claimed_at"),

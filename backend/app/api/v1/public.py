@@ -25,6 +25,7 @@ from app.core.constants import (
     DURATION_CHOICES,
     TITLE_CHOICES,
     YEAR_CHOICES,
+    passed_out_year_choices,
 )
 from app.core.ratelimit import limiter
 from app.repositories.applications import DuplicateTransactionId
@@ -44,6 +45,7 @@ def get_choices() -> ChoicesOut:
         domains=DOMAIN_CHOICES,
         durations=DURATION_CHOICES,
         years=YEAR_CHOICES,
+        passed_out_years=passed_out_year_choices(),
         programmes=[
             ProgrammeOut(name=d.name, summary=d.summary, stack=list(d.stack))
             for d in DOMAIN_CATALOG
@@ -81,6 +83,8 @@ async def submit_application(
     mode: str | None = Form(None),
     project_topic: str | None = Form(None),
     other: str | None = Form(None),
+    native_place: str | None = Form(None),
+    passed_out_year: str | None = Form(None),
     payment_screenshot: UploadFile = File(...),
 ) -> ApplicationOut:
     try:
@@ -105,6 +109,8 @@ async def submit_application(
             mode=mode,
             project_topic=project_topic,
             other=other,
+            native_place=native_place,
+            passed_out_year=passed_out_year,
         )
     except ValidationError as exc:
         raise HTTPException(

@@ -339,3 +339,100 @@ def test_mode_must_be_a_real_choice(client: TestClient):
         data=_live_site_payload(mode="Telepathic"), files=_shot(),
     )
     assert res.status_code == 422
+
+
+# ── Native place and year of passing out ─────────────────────────────────
+#
+# Added to the public form after it was already live, which is the whole
+# difficulty: the deployed site does not send either field, so the API has to
+# accept both presence and absence. These pin down both halves.
+
+
+def _payload_with(**extra) -> dict:
+    form = {
+        "title": "Mr.", "name": "Native Fields",
+        "email": f"{_unique('native')}@example.com", "phone": "9876500999",
+        "college": "PSG College of Technology", "place": "Coimbatore",
+        "department": "ECE", "year": "Final Year", "applicant_type": "student",
+        "category": "Internship", "domain": "Full Stack Python", "duration": "30 Days",
+        "start_date": "2026-09-01", "end_date": "2026-10-01",
+        "amount": "12000", "transaction_id": _unique("TXN"), "declaration": "true",
+    }
+    form.update(extra)
+    return form
+
+
+def _shot_png() -> dict:
+    return {"payment_screenshot": ("proof.png", io.BytesIO(b"\x89PNG\r\n fake"), "image/png")}
+
+
+def test_native_place_and_passing_year_survive_the_round_trip(client: TestClient):
+    """Submitted on the public form, readable back off the record.
+
+    A field that validates but is dropped before Firestore looks identical to
+    a working one at the point of submission — the applicant sees 201 either
+    way. Reading it back is the only thing that proves it was stored.
+    """
+    res = client.post(
+        "/api/v1/public/applications",
+        data=_payload_with(native_place="Salem", passed_out_year="2027"),
+        files=_shot_png(),
+    )
+    assert res.status_code == 201, res.text
+    body = res.json()
+    assert body["native_place"] == "Salem"
+    assert body["passed_out_year"] == "2027"
+
+    stored = get_firestore().collection("applications").document(body["id"]).get().to_dict()
+    assert stored["native_place"] == "Salem"
+    assert stored["passed_out_year"] == "2027"
+
+
+def test_the_older_deployed_form_still_submits_without_them(client: TestClient):
+    """The live site predates both fields. It must not start failing."""
+    res = client.post("/api/v1/public/applications", data=_payload_with(), files=_shot_png())
+    assert res.status_code == 201, res.text
+    assert res.json()["native_place"] is None
+    assert res.json()["passed_out_year"] is None
+
+
+def test_a_nonsense_passing_year_is_refused(client: TestClient):
+    for bad in ("27", "twenty twenty six", "1985", "2099"):
+        res = client.post(
+            "/api/v1/public/applications",
+            data=_payload_with(passed_out_year=bad),
+            files=_shot_png(),
+        )
+        assert res.status_code == 422, f"{bad!r} was accepted: {res.text}"
+
+
+def test_a_professional_who_graduated_years_ago_can_still_pick_their_year(client: TestClient):
+    """The offered range has to cover the upskilling professionals, not just
+    students. Ten years back is an ordinary case for them."""
+    from datetime import UTC, datetime
+
+    long_ago = str(datetime.now(UTC).year - 10)
+    offered = client.get("/api/v1/public/choices").json()["passed_out_years"]
+    assert long_ago in offered
+
+    res = client.post(
+        "/api/v1/public/applications",
+        data=_payload_with(applicant_type="professional", category="Course",
+                           passed_out_year=long_ago),
+        files=_shot_png(),
+    )
+    assert res.status_code == 201, res.text
+    assert res.json()["passed_out_year"] == long_ago
+
+
+def test_the_offered_years_track_the_calendar(client: TestClient):
+    """Hardcoding the list is the failure mode worth guarding: it works until
+    the new year, then quietly stops offering the incoming batch a valid
+    option — with no error anywhere to notice."""
+    from datetime import UTC, datetime
+
+    offered = client.get("/api/v1/public/choices").json()["passed_out_years"]
+    this_year = datetime.now(UTC).year
+    assert str(this_year) in offered
+    assert str(this_year + 1) in offered, "next year's graduates have no option"
+    assert offered == sorted(offered, reverse=True), "years should read newest first"

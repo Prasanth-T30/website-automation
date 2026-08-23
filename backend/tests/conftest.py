@@ -13,6 +13,7 @@ Tests here are skipped automatically if it isn't reachable.
 from __future__ import annotations
 
 import os
+import re
 import socket
 import uuid
 
@@ -53,6 +54,22 @@ def _emulator_reachable(host: str) -> bool:
 
 
 EMULATOR_UP = _emulator_reachable(os.environ["FIRESTORE_EMULATOR_HOST"])
+
+def same_pdf(a: bytes, b: bytes) -> bool:
+    """Compare two rendered PDFs, ignoring when they were rendered.
+
+    fpdf2 stamps a second-resolution /CreationDate into every file and derives
+    the /ID trailer from it, so two renders of identical content differ
+    whenever they straddle a tick. Everything that describes the *document*
+    survives this mask, which is what "the preview is what gets sent" means.
+    """
+    return _PDF_VOLATILE.sub(b"", a) == _PDF_VOLATILE.sub(b"", b)
+
+
+_PDF_VOLATILE = re.compile(
+    rb"/CreationDate \(D:\d{14}Z\)|/ID \[<[0-9A-Fa-f]+><[0-9A-Fa-f]+>\]"
+)
+
 
 requires_emulator = pytest.mark.skipif(
     not EMULATOR_UP,

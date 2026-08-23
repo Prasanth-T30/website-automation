@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import re
 import smtplib
+import ssl
 from email.mime.application import MIMEApplication
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
@@ -154,19 +155,15 @@ CERTIFICATE_SUBJECT = "Certificate of Internship"
 OFFER_SUBJECT = "Offer of Internship"
 
 
-def render_completion_body(student: Student, custom_body: str | None = None) -> str:
-    """Body for the certificate email — Dvein's own wording.
+def _completion_content(*, name: str) -> str:
+    """The default certificate message, as the HTML that goes in the shell.
 
-    The greeting is the only part that varies. The rest is the institute's
-    supplied copy verbatim, so what a student receives does not drift with
-    whoever pressed the button.
+    Split out so `completion_body_text` can hand the same copy to the
+    console as editable plain text — one source, so an HR edits exactly what
+    the template would otherwise have sent.
     """
-    if custom_body:
-        content = custom_body.replace("\n\n", "</p><p>").replace("\n", "<br>")
-        return _wrap(f"<p>{content}</p>")
-
-    content = (
-        f"<p>Dear {student.name},</p>"
+    return (
+        f"<p>Dear {name},</p>"
         f"<p>Greetings from {COMPANY_NAME}</p>"
         f"<p>Congratulations on successfully completing your internship with us. "
         f"We appreciate your dedication, enthusiasm and active participation "
@@ -182,7 +179,67 @@ def render_completion_body(student: Student, custom_body: str | None = None) -> 
         f"<p>Thank you for being a part of {_sentence_end(COMPANY_NAME)}</p>"
         f"{_signature()}"
     )
-    return _wrap(content)
+
+
+def render_completion_body(
+    student: Student,
+    custom_body: str | None = None,
+    *,
+    name: str | None = None,
+) -> str:
+    """Body for the certificate email — Dvein's own wording.
+
+    The greeting is the only part that varies. The rest is the institute's
+    supplied copy verbatim, so what a student receives does not drift with
+    whoever pressed the button.
+
+    `name` overrides the greeting when an HR has corrected the spelling on
+    the certificate itself, so the letter and the mail carrying it agree.
+    """
+    if custom_body:
+        content = custom_body.replace("\n\n", "</p><p>").replace("\n", "<br>")
+        return _wrap(f"<p>{content}</p>")
+
+    return _wrap(_completion_content(name=name or student.name))
+
+
+def completion_body_text(*, name: str) -> str:
+    """The default certificate email as editable plain text."""
+    return _plain_text_of(_completion_content(name=name))
+
+
+def _offer_content(
+    *,
+    name: str,
+    salutation: str | None,
+    category: str | None,
+    duration_text: str | None,
+) -> str:
+    """The default offer-letter message, as the HTML that goes inside the shell.
+
+    Split out from `render_offer_body` so `offer_body_text` can hand the very
+    same copy to the console as editable plain text. One source, so what an HR
+    edits is what the template would otherwise have sent.
+    """
+    addressed = f"{salutation} {name}".strip() if salutation else name
+    noun = (category or "Internship").title()
+    programme = f"{duration_text} Programme" if duration_text else f"{noun} Programme"
+
+    return (
+        f"<p>Dear {addressed},</p>"
+        f"<p>Greetings from {COMPANY_NAME}</p>"
+        f"<p>We are pleased to inform you that you have been selected for the "
+        f"{programme} at {_sentence_end(COMPANY_NAME)}</p>"
+        f"<p>Please find the attached {noun} Offer Letter for your reference and "
+        f"further details regarding the {noun.lower()} duration, schedule, and "
+        f"programme information.</p>"
+        f"<p>Kindly review the document and acknowledge your acceptance by replying "
+        f"to this email.</p>"
+        f"<p>We look forward to having you as part of our {noun.lower()} programme "
+        f"and wish you a valuable learning experience with us.</p>"
+        f"<p>For any further queries, feel free to contact us.</p>"
+        f"{_signature()}"
+    )
 
 
 def render_offer_body(
@@ -199,31 +256,46 @@ def render_offer_body(
     supplied copy says "One-Month Internship Programme", but duration is a
     field on the form, so hardcoding a month would tell a fifteen-day intern
     something untrue.
+
+    A `custom_body` replaces the copy entirely, signature included. The console
+    prefills its editor from `offer_body_text`, so an HR who edits one sentence
+    still sends a signed letter rather than an unsigned fragment.
     """
     if custom_body:
         content = custom_body.replace("\n\n", "</p><p>").replace("\n", "<br>")
         return _wrap(f"<p>{content}</p>")
 
-    addressed = f"{salutation} {name}".strip() if salutation else name
-    noun = (category or "Internship").title()
-    programme = f"{duration_text} Programme" if duration_text else f"{noun} Programme"
-
-    content = (
-        f"<p>Dear {addressed},</p>"
-        f"<p>Greetings from {COMPANY_NAME}</p>"
-        f"<p>We are pleased to inform you that you have been selected for the "
-        f"{programme} at {_sentence_end(COMPANY_NAME)}</p>"
-        f"<p>Please find the attached {noun} Offer Letter for your reference and "
-        f"further details regarding the {noun.lower()} duration, schedule, and "
-        f"programme information.</p>"
-        f"<p>Kindly review the document and acknowledge your acceptance by replying "
-        f"to this email.</p>"
-        f"<p>We look forward to having you as part of our {noun.lower()} programme "
-        f"and wish you a valuable learning experience with us.</p>"
-        f"<p>For any further queries, feel free to contact us.</p>"
-        f"{_signature()}"
+    return _wrap(
+        _offer_content(
+            name=name,
+            salutation=salutation,
+            category=category,
+            duration_text=duration_text,
+        )
     )
-    return _wrap(content)
+
+
+def offer_body_text(
+    *,
+    name: str,
+    salutation: str | None = None,
+    category: str | None = None,
+    duration_text: str | None = None,
+) -> str:
+    """The default offer email as editable plain text.
+
+    What the console puts in its message box. Derived from the same markup the
+    template sends, so the two cannot drift; sending it back unedited produces
+    the same letter.
+    """
+    return _plain_text_of(
+        _offer_content(
+            name=name,
+            salutation=salutation,
+            category=category,
+            duration_text=duration_text,
+        )
+    )
 
 
 def render_rejection_body(application: Application, reason: str) -> str:
@@ -237,6 +309,15 @@ def render_rejection_body(application: Application, reason: str) -> str:
         f"<p>Thank you,<br>Training Team</p>"
     )
     return _wrap(content)
+
+
+def render_smtp_test_body() -> str:
+    """Branded body for the operator-initiated SMTP self-test."""
+    return _wrap(
+        "<p><strong>SMTP verification succeeded.</strong></p>"
+        "<p>This message was sent by the DVein HRM backend as an operator-requested "
+        "delivery check. No action is required.</p>"
+    )
 
 
 def send_email(
@@ -331,6 +412,33 @@ def send_email(
         return False
 
 
+def verify_smtp_connection() -> tuple[bool, str]:
+    """Verify transport, TLS, authentication, and server responsiveness.
+
+    This performs no delivery. It is safe to use as a readiness check because
+    it authenticates, issues SMTP NOOP, and closes the connection without
+    creating a message or consuming the account's sending quota.
+    """
+    if not settings.smtp_configured:
+        return False, "SMTP_HOST is not configured"
+    if not settings.smtp_authenticates:
+        return False, "SMTP username and app password are required"
+
+    try:
+        with _connect() as smtp:
+            smtp.login(settings.smtp_username, settings.smtp_password)
+            code, _ = smtp.noop()
+        if code != 250:
+            return False, f"SMTP server returned status {code}"
+        return True, "TLS connection and authentication succeeded"
+    except smtplib.SMTPAuthenticationError:
+        logger.warning("SMTP authentication failed for %s", settings.smtp_username)
+        return False, "SMTP authentication failed"
+    except (OSError, smtplib.SMTPException) as exc:
+        logger.warning("SMTP readiness check failed: %s", type(exc).__name__)
+        return False, f"SMTP connection failed ({type(exc).__name__})"
+
+
 def _connect() -> smtplib.SMTP:
     """Open the SMTP connection the configured way.
 
@@ -338,10 +446,18 @@ def _connect() -> smtplib.SMTP:
     in the clear and upgrading, so it needs SMTP_SSL rather than starttls() —
     getting this wrong is a silent failure that looks like a bad password.
     """
+    tls_context = ssl.create_default_context()
     if settings.smtp_security == "ssl":
-        return smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=20)
+        return smtplib.SMTP_SSL(
+            settings.smtp_host,
+            settings.smtp_port,
+            timeout=20,
+            context=tls_context,
+        )
 
     smtp = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20)
     if settings.smtp_security == "starttls":
-        smtp.starttls()
+        smtp.ehlo()
+        smtp.starttls(context=tls_context)
+        smtp.ehlo()
     return smtp

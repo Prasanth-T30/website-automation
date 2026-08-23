@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "console",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "frontend/console", "dev"],
+      "port": 5173,
+      "autoPort": false
+    },
+    {
+      "name": "registration",
+      "url": "http://localhost:5174",
+      "port": 5174,
+      "autoPort": false
+    }
+  ]
+}

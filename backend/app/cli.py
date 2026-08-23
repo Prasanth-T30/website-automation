@@ -1,8 +1,14 @@
 """Small operational CLI.
 
     python -m app.cli check    verify this process can reach Firebase
+    python -m app.cli smtp-check  verify SMTP TLS and authentication (sends nothing)
+    python -m app.cli smtp-test   verify SMTP and send one labelled message to the sender
     python -m app.cli seed     create the admin + three HR accounts (idempotent)
     python -m app.cli whoami   list existing accounts
+    python -m app.cli wipe <project-id>   delete every document and stored file
+    python -m app.cli set-password <email> [password]   reset a locked-out account
+    python -m app.cli demo <project-id>   load sample data to walk through the console
+    python -m app.cli automation [--send]   what the scheduled run would send (dry by default)
 """
 
 from __future__ import annotations
@@ -16,6 +22,7 @@ from app.core.security import generate_password, hash_password
 from app.models.user import UserRole
 from app.repositories.activity import ActivityRepository
 from app.repositories.users import UserRepository
+from app.schemas.user import validate_password
 
 # Deliberately generic placeholders — the admin renames these to the real
 # people from the Users screen after first sign-in.
@@ -47,7 +54,13 @@ def seed() -> int:
             phone=None,
             # A generated password must be replaced; an operator-chosen one
             # from .env is assumed intentional.
-            must_change_password=password is None,
+            #
+            # Keyed on "was one supplied", not "is it None": a bare
+            # `SEED_ADMIN_PASSWORD=` line — which is exactly what .env.example
+            # ships — arrives as "", so the old `password is None` test made
+            # every generated password count as deliberate and left the seeded
+            # accounts ungated.
+            must_change_password=not password,
         )
         activity_repo.record(
             action="user.seeded",
@@ -69,6 +82,222 @@ def seed() -> int:
         print("\n  Accounts created with a generated password must change it at first login.")
     else:
         print("\n  Nothing to do — all four accounts already exist.")
+    return 0
+
+
+def set_password() -> int:
+    """Set an account's password from the server.
+
+    The way back in when an admin is locked out. There is no self-service
+    reset by design, and the in-app one at /admin/users/{id}/reset-password
+    needs an admin who can already sign in — which is circular when the admin
+    is the one who forgot. Run on the server, where shell access is itself
+    the proof of authority.
+
+    Omit the password to have one generated and the account forced to change
+    it at next login; supply one and it is taken as deliberate.
+    """
+    email = sys.argv[2].lower().strip() if len(sys.argv) > 2 else None
+    supplied = sys.argv[3] if len(sys.argv) > 3 else None
+    if not email:
+        print("  Usage: python -m app.cli set-password <email> [password]")
+        print("         Omit the password to generate a temporary one.")
+        return 1
+
+    users = UserRepository(get_firestore())
+    user = users.get_by_email(email)
+    if user is None:
+        print(f"  No account with the address {email}.")
+        print("  Run `python -m app.cli whoami` to list them.")
+        return 1
+
+    secret = supplied or generate_password()
+    try:
+        validate_password(secret)
+    except ValueError as exc:
+        print(f"  {exc}")
+        return 1
+
+    users.update_fields(
+        user.id,
+        {"password_hash": hash_password(secret), "must_change_password": supplied is None},
+    )
+    # Anyone holding a session for this account is signed out: a password
+    # reset is exactly the moment old sessions should stop working.
+    users.bump_token_version(user.id)
+
+    ActivityRepository(get_firestore()).record(
+        action="user.password_reset",
+        entity_type="user",
+        entity_id=user.id,
+        summary=f"Password reset from the CLI for {email}",
+    )
+
+    print(f"  Password updated for {email} ({user.role.value}).")
+    print(f"    {secret}")
+    if supplied is None:
+        print("\n  Generated, so it must be changed at next login.")
+    else:
+        print("\n  Set as given; no change will be forced at login.")
+    print("  Any existing session for this account has been signed out.")
+    return 0
+
+
+def demo() -> int:
+    """Load a realistic sample dataset on top of the seeded accounts.
+
+    Guarded the same way as `wipe`: naming the project is the confirmation,
+    so this cannot be run against production by muscle memory. Sends no mail
+    of any kind — it writes through the repositories, never the endpoints
+    that email an applicant.
+    """
+    expected = settings.firebase_project_id
+    if (sys.argv[2] if len(sys.argv) > 2 else None) != expected:
+        print("  Refusing to load demo data without confirmation.")
+        print(f"    Configured project: {expected}")
+        print(f"    Run:  python -m app.cli demo {expected}")
+        return 1
+
+    # Sample students carry @example.com addresses, which accept no mail. With
+    # scheduled sending live, loading them arms a run that mails every one and
+    # bounces the lot back into the sending mailbox.
+    if settings.automation_enabled and "--i-know" not in sys.argv[3:]:
+        print("  Refusing: AUTOMATION_ENABLED is true.")
+        print("  The sample students would be emailed automatically, and every")
+        print("  address is @example.com, so each send would bounce.")
+        print()
+        print("  Turn automation off first, or re-run with --i-know to override.")
+        return 1
+
+    from app.demo_data import build
+
+    db = get_firestore()
+    if sum(1 for _ in db.collection("students").limit(1).stream()):
+        print("  There are already students in this project.")
+        print(f"  Clear it first:  python -m app.cli wipe {expected} && python -m app.cli seed")
+        return 1
+
+    try:
+        made = build(db)
+    except RuntimeError as exc:
+        print(f"  {exc}")
+        return 1
+
+    print(f"  Loaded demo data into {expected}:")
+    print()
+    for label, count in made.items():
+        print(f"    {label:<16} {count}")
+    print()
+    print("  No email was sent. Sign in and try Documents > Offer Letters / Certificates.")
+    return 0
+
+
+def automation_run() -> int:
+    """Show what the scheduled run would send, or actually send it.
+
+    Dry by default. `--send` is the only way to make anything leave, and even
+    then AUTOMATION_ENABLED still has to be on.
+    """
+    from app.api.deps import get_storage_service
+    from app.repositories.applications import ApplicationRepository
+    from app.repositories.batches import BatchRepository
+    from app.repositories.payments import PaymentRepository
+    from app.repositories.reports import ReportRepository
+    from app.repositories.students import StudentRepository
+    from app.services import automation
+    from app.services.documents import offer_letter_fields
+
+    live = "--send" in sys.argv[2:]
+    db = get_firestore()
+    result = automation.run(
+        students=StudentRepository(db),
+        payments=PaymentRepository(db),
+        reports=ReportRepository(db),
+        batches=BatchRepository(db),
+        applications=ApplicationRepository(db),
+        storage=get_storage_service(),
+        activity_repo=ActivityRepository(db),
+        offer_letter_fields=offer_letter_fields,
+        dry_run=not live,
+    )
+
+    print(f"  automation enabled : {settings.automation_enabled}")
+    print(f"  mode               : {'SEND' if live else 'dry run'}")
+    print(f"  cap per run        : {settings.automation_max_per_run}")
+    print()
+    print(f"  due now: {len(result.planned)}")
+    for item in result.planned:
+        print(f"    {item.kind:<13} {item.name:<24} {item.email:<32} {item.reason}")
+
+    if result.sent:
+        print()
+        print(f"  sent: {len(result.sent)}")
+        for row in result.sent:
+            state = "emailed" if row["email_sent"] else "filed, email FAILED"
+            print(f"    {row['kind']:<13} {row['name']:<24} {state}")
+    if result.failed:
+        print()
+        print(f"  failed: {len(result.failed)}")
+        for row in result.failed:
+            print(f"    {row['kind']:<13} {row['name']:<24} {row['error']}")
+    if result.skipped_over_cap:
+        print()
+        print(f"  {result.skipped_over_cap} left for the next run (cap reached)")
+
+    print()
+    if not live and result.planned:
+        print("  Nothing was sent. Add --send to actually send these.")
+    if live and not settings.automation_enabled:
+        print("  Nothing was sent: AUTOMATION_ENABLED is false.")
+    return 0
+
+
+def wipe() -> int:
+    """Delete every Firestore document and every stored file.
+
+    Takes the project id as an argument and refuses unless it matches the one
+    configured. There is no undo and no confirmation prompt that a script
+    could answer by accident — naming the target is the confirmation.
+    """
+    expected = settings.firebase_project_id
+    given = sys.argv[2] if len(sys.argv) > 2 else None
+    if given != expected:
+        print("  Refusing to wipe without confirmation.")
+        print(f"    Configured project: {expected}")
+        print(f"    Run:  python -m app.cli wipe {expected}")
+        return 1
+
+    db = get_firestore()
+    print(f"  Wiping Firestore project {expected} ...")
+    total = 0
+    for collection in db.collections():
+        removed = 0
+        # Streamed and deleted in batches: a collection can outgrow memory,
+        # and Firestore has no "delete collection" operation.
+        while True:
+            docs = list(collection.limit(400).stream())
+            if not docs:
+                break
+            batch = db.batch()
+            for doc in docs:
+                batch.delete(doc.reference)
+            batch.commit()
+            removed += len(docs)
+        total += removed
+        print(f"    — {collection.id:<20} {removed} documents")
+
+    print()
+    print("  Wiping Storage ...")
+    bucket = get_bucket()
+    files = 0
+    for blob in bucket.list_blobs():
+        blob.delete()
+        files += 1
+    print(f"    — {files} files")
+
+    print()
+    print(f"  Done. {total} documents and {files} files removed.")
+    print("  Run `python -m app.cli seed` to recreate the sign-in accounts.")
     return 0
 
 
@@ -161,7 +390,52 @@ def check() -> int:
     return 0
 
 
-COMMANDS = {"check": check, "seed": seed, "whoami": whoami}
+def smtp_check() -> int:
+    """Verify SMTP connectivity and credentials without sending an email."""
+    from app.services.email import verify_smtp_connection
+
+    print(f"  host           : {settings.smtp_host or '<not configured>'}")
+    print(f"  port           : {settings.smtp_port}")
+    print(f"  security       : {settings.smtp_security}")
+    print(f"  username       : {settings.smtp_username or '<not configured>'}")
+    print(f"  sender         : {settings.smtp_from_email}")
+    print()
+
+    ok, detail = verify_smtp_connection()
+    print(f"  SMTP           : {'OK' if ok else 'FAILED'} - {detail}")
+    return 0 if ok else 1
+
+
+def smtp_test() -> int:
+    """Authenticate and send one clearly labelled verification message to self."""
+    from app.services.email import render_smtp_test_body, send_email, verify_smtp_connection
+
+    ok, detail = verify_smtp_connection()
+    if not ok:
+        print(f"  SMTP           : FAILED - {detail}")
+        return 1
+
+    recipient = settings.smtp_username or settings.smtp_from_email
+    sent = send_email(
+        to_email=recipient,
+        subject="[DVein HRM] SMTP verification",
+        body_html=render_smtp_test_body(),
+    )
+    print(f"  Delivery       : {'SENT' if sent else 'FAILED'} - {recipient}")
+    return 0 if sent else 1
+
+
+COMMANDS = {
+    "check": check,
+    "smtp-check": smtp_check,
+    "smtp-test": smtp_test,
+    "seed": seed,
+    "whoami": whoami,
+    "wipe": wipe,
+    "set-password": set_password,
+    "demo": demo,
+    "automation": automation_run,
+}
 
 
 def main() -> int:

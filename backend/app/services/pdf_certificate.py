@@ -48,6 +48,15 @@ BODY_MAX_WIDTH = 720.0
 
 INK = (26, 26, 26)
 MUTED = (120, 120, 120)
+# Sampled from the artwork itself: the border and corner navy. The recipient's
+# name is set in it so it reads as part of the design rather than typed on top
+# of it. Near-black bold sans belonged to neither the border nor the gold rule
+# it sits on, which is what made it look pasted on.
+NAME_INK = (30, 59, 93)
+# A serif at a whisker of tracking sits on an engraved gold rule the way a
+# certificate expects; the weight comes from the colour and the space around
+# it, not from bolding.
+NAME_TRACKING = 0.6
 
 LEAD_IN = "This certificate is proudly presented to"
 TRAILER = "in"
@@ -165,14 +174,25 @@ def build_certificate_pdf(student: Student, batch=None) -> bytes:
     pdf.text(RULE_X0 - 6 - pdf.get_string_width(lead), FIRST_BASELINE, lead)
     pdf.text(RULE_X1 + 8, FIRST_BASELINE, _latin1(TRAILER))
 
-    pdf.set_font("Helvetica", "B", NAME_SIZE)
+    pdf.set_font("Times", "", NAME_SIZE)
+    pdf.set_char_spacing(NAME_TRACKING)
     name = _latin1(student.name.strip())
     # Long names shrink to stay inside the rule rather than overrunning it.
+    # Tracking counts toward the width, so it is measured with it applied.
     size = NAME_SIZE
     while size > 11 and pdf.get_string_width(name) > (RULE_X1 - RULE_X0 - 12):
         size -= 0.5
-        pdf.set_font("Helvetica", "B", size)
-    pdf.text(RULE_MID - pdf.get_string_width(name) / 2, RULE_Y - 4, name)
+        pdf.set_font("Times", "", size)
+    pdf.set_text_color(*NAME_INK)
+    # fpdf2 measures tracking after every glyph, the last one included, so the
+    # reported width carries a trailing gap that is not ink. Centring on it
+    # would sit the name half that gap left of the rule's midpoint.
+    width = pdf.get_string_width(name) - NAME_TRACKING
+    # Raised just enough that descenders meet the gold rule instead of
+    # crossing it — the name should rest on the line, not sink through it.
+    pdf.text(RULE_MID - width / 2, RULE_Y - 5.5, name)
+    pdf.set_char_spacing(0)
+    pdf.set_text_color(*INK)
 
     # ── Body paragraph, with the real programme in place of the template's
     #    bold placeholder ─────────────────────────────────────────────────

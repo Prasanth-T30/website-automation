@@ -9,8 +9,8 @@
   "hosting": [
     {
       "target": "console",
-      "public": "frontend/dist",
-      "predeploy": ["pnpm --dir frontend build"],
+      "public": "frontend/console/dist",
+      "predeploy": ["pnpm --dir frontend/console build"],
       "ignore": ["**/.*", "**/node_modules/**"],
       "rewrites": [
         {
@@ -34,8 +34,8 @@
     },
     {
       "target": "registration",
-      "public": "registration/dist",
-      "predeploy": ["pnpm --dir registration build"],
+      "public": "frontend/registration/dist",
+      "predeploy": ["pnpm --dir frontend/registration build"],
       "ignore": ["**/.*", "**/node_modules/**"],
       "rewrites": [
         {

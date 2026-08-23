@@ -102,7 +102,10 @@ def test_tampered_token_is_rejected():
 def test_token_signed_with_another_key_is_rejected():
     import jwt
 
-    forged = jwt.encode({"sub": "1", "type": "access", "exp": 9999999999}, "attacker-key")
+    forged = jwt.encode(
+        {"sub": "1", "type": "access", "exp": 9999999999},
+        "attacker-key-that-is-at-least-32-bytes-long",
+    )
     with pytest.raises(TokenError):
         decode_token(forged, expected_type="access")
 

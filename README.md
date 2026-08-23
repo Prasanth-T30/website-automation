@@ -27,8 +27,9 @@ entirely under the API's control. Firestore and Storage hold data and files only
 
 ## Layout
 
-Three deployable units. The registration form is separate from the console
-because it is the only surface strangers reach, and it ships no console code.
+Three deployable units grouped into two top-level boundaries. The registration form
+is separate from the console because it is the only surface strangers reach, and it
+ships no console code.
 
 ```
 backend/        FastAPI service
@@ -40,15 +41,16 @@ backend/        FastAPI service
     api/v1/        routers
     services/      domain logic, PDFs, email, Storage wrapper
 
-frontend/       React SPA — the staff console
-  src/
-    styles/      design tokens + globals
-    components/  UI primitives
-    features/    per-domain API clients and JSDoc typedefs
-    routes/      page components
-    lib/         api client, helpers
+frontend/       Browser applications
+  console/      React SPA — the staff console
+    src/
+      styles/      design tokens + globals
+      components/  UI primitives
+      features/    per-domain API clients and JSDoc typedefs
+      routes/      page components
+      lib/         api client, helpers
 
-registration/   React SPA — the public form (no auth, no console code)
+  registration/ React SPA — the public form (no auth, no console code)
 ```
 
 ---
@@ -112,7 +114,7 @@ Two things to know:
 
 - **Tests run against their own Firestore project**, not your dev data. Each
   `pytest` run gets a throwaway `test-run-<uuid>` namespace (see
-  `tests/conftest.py`), so it can share a running emulator with the console
+  `backend/tests/conftest.py`), so it can share a running emulator with the console
   without leaving fabricated students and payments behind. If you ever need to
   reset the dev namespace by hand:
 
@@ -177,14 +179,14 @@ pnpm deploy:rules        # Firestore + Storage rules
 ```
 
 The frontends need `VITE_API_URL` at build time. It lives in
-`frontend/.env.production` and `registration/.env.production` — both
+`frontend/console/.env.production` and `frontend/registration/.env.production` — both
 gitignored, both containing the Cloud Run URL. **A machine that clones this
 repo will not have them**, and the resulting build silently falls back to
 same-origin, which reintroduces the cookie bug. Recreate them before building:
 
 ```bash
-echo "VITE_API_URL=https://dvein-hrm-api-931951603198.asia-south1.run.app" > frontend/.env.production
-echo "VITE_API_URL=https://dvein-hrm-api-931951603198.asia-south1.run.app" > registration/.env.production
+echo "VITE_API_URL=https://dvein-hrm-api-931951603198.asia-south1.run.app" > frontend/console/.env.production
+echo "VITE_API_URL=https://dvein-hrm-api-931951603198.asia-south1.run.app" > frontend/registration/.env.production
 ```
 
 To change an environment variable, edit it on the service rather than
@@ -217,19 +219,49 @@ it at first sign-in. Until they do, every endpoint outside `/auth/me` and
 `/auth/change-password` returns 403 — a temporary password is deliberately
 useless for anything but replacing itself.
 
-### Rotating the SMTP password
+### Configuring or rotating Gmail SMTP
 
 The password is in Secret Manager, not in any file or image layer.
+
+For a first-time setup, create the secret once (skip this command when it
+already exists):
+
+```bash
+gcloud secrets create smtp-password --replication-policy=automatic \
+  --project dvein-hrm
+```
+
+Add the App Password as a secret version, then set the non-secret mailbox
+configuration and mount the secret on Cloud Run:
 
 ```bash
 printf %s 'NEW_APP_PASSWORD' | gcloud secrets versions add smtp-password \
   --data-file=- --project dvein-hrm
 gcloud run services update dvein-hrm-api --region asia-south1 \
+  --update-env-vars "SMTP_HOST=smtp.gmail.com,SMTP_PORT=587,SMTP_SECURITY=starttls,SMTP_USERNAME=dveininnovation@gmail.com,SMTP_FROM_EMAIL=dveininnovation@gmail.com,SMTP_FROM_NAME=Dvein Innovations,SMTP_REPLY_TO=dveininnovation@gmail.com" \
   --update-secrets SMTP_PASSWORD=smtp-password:latest
 ```
 
 The service reads `:latest`, so the new version takes effect on the next
 revision. Update `.env` locally too if you send mail from a laptop.
+
+Check TLS and authentication without sending a message:
+
+```bash
+cd backend
+uv run python -m app.cli smtp-check
+```
+
+After that passes, send one clearly labelled verification message back to the
+sending mailbox:
+
+```bash
+uv run python -m app.cli smtp-test
+```
+
+For Gmail, use `smtp.gmail.com` with STARTTLS on port 587 (or SSL on port
+465), the complete Gmail address as the username, and a 16-character Google
+App Password. Display spaces in the App Password are removed automatically.
 
 ### Rotating the JWT secret
 
@@ -333,7 +365,8 @@ shape are defined by the code that writes to them (`app/models/`,
 ## Tests
 
 Repository, Storage and full HTTP end-to-end tests run against the **real**
-Firebase emulator rather than mocks. **295 backend, 20 frontend.**
+Firebase emulator rather than mocks. The current suite contains **310 backend
+tests and 20 console frontend tests**.
 
 Backend tests auto-skip if the emulator is unreachable, so a green run with
 everything skipped is not a pass — check the count, not the colour.
@@ -347,7 +380,10 @@ cd backend && uv run pytest
 ```
 
 ```bash
-cd frontend && pnpm test
+pnpm --dir frontend/console test
+pnpm --dir frontend/console lint
+pnpm --dir frontend/registration lint
+pnpm build
 ```
 
 `conftest.py` overwrites the SMTP settings rather than defaulting them: the

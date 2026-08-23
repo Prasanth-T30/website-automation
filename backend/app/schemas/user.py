@@ -12,8 +12,12 @@ from app.models.user import UserRole
 MIN_PASSWORD_LENGTH = 10
 
 
-def _validate_password(v: str) -> str:
-    """Reject passwords bcrypt would silently truncate, and trivially short ones."""
+def validate_password(v: str) -> str:
+    """Reject passwords bcrypt would silently truncate, and trivially short ones.
+
+    Public because the CLI's recovery path enforces the same rule, and a
+    policy restated in two places is a policy that will disagree with itself.
+    """
     if len(v) < MIN_PASSWORD_LENGTH:
         raise ValueError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters.")
     if len(v.encode("utf-8")) > BCRYPT_MAX_BYTES:
@@ -27,7 +31,7 @@ class Password(BaseModel):
     @field_validator("password", "new_password", check_fields=False)
     @classmethod
     def _check_password(cls, v: str) -> str:
-        return _validate_password(v)
+        return validate_password(v)
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
