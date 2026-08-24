@@ -1,14 +1,13 @@
-# What NOT to upload to Cloud Build.
+# What NOT to copy into the image.
 #
-# Without this file the whole directory goes up — including .venv, which is a
-# Windows virtualenv roughly a hundred times larger than the application it
-# supports. It cannot run on the Linux base image, so it is pure upload cost
-# on every deploy, and `COPY . .` would bake it into the shipped layer too.
+# Without this file `COPY . .` bakes in .venv — a Windows virtualenv roughly a
+# hundred times larger than the application it supports, which cannot run on
+# the Linux base image anyway.
 #
-# Note this file is NOT the same as .dockerignore: gcloud reads this one when
-# staging the source, Docker reads that one when building. Both exist, and
-# both have to list .venv, or whichever is missing lets it back in.
-
+# Note this file is NOT the same as .gcloudignore: Docker reads this one when
+# building, gcloud reads that one when staging source for Cloud Build. Both
+# exist, and both have to list .venv, or whichever is missing lets it back in.
+# Render builds this Dockerfile directly, so only this file applies there.
 .venv/
 .venv-*/
 venv/

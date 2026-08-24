@@ -209,17 +209,26 @@ def automation_run() -> int:
 
     live = "--send" in sys.argv[2:]
     db = get_firestore()
-    result = automation.run(
-        students=StudentRepository(db),
-        payments=PaymentRepository(db),
-        reports=ReportRepository(db),
-        batches=BatchRepository(db),
-        applications=ApplicationRepository(db),
-        storage=get_storage_service(),
-        activity_repo=ActivityRepository(db),
-        offer_letter_fields=offer_letter_fields,
-        dry_run=not live,
-    )
+    try:
+        result = automation.run(
+            students=StudentRepository(db),
+            payments=PaymentRepository(db),
+            reports=ReportRepository(db),
+            batches=BatchRepository(db),
+            applications=ApplicationRepository(db),
+            storage=get_storage_service(),
+            activity_repo=ActivityRepository(db),
+            offer_letter_fields=offer_letter_fields,
+            dry_run=not live,
+        )
+    except Exception as exc:  # noqa: BLE001 - this is a scheduled job's top level
+        # A scheduled run is read in a log days later, usually by someone who
+        # did not write this. An unreachable database should say so in one
+        # line, not as sixty lines of gRPC traceback; the non-zero exit is
+        # what the scheduler acts on either way.
+        print(f"  Automation run failed: {type(exc).__name__}: {str(exc)[:300]}")
+        print("  Nothing was sent. The next scheduled run will try again.")
+        return 1
 
     print(f"  automation enabled : {settings.automation_enabled}")
     print(f"  mode               : {'SEND' if live else 'dry run'}")
