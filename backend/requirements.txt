@@ -1,0 +1,35 @@
+# Runtime dependencies, pinned.
+#
+# `pyproject.toml` remains the source of truth for *what* this service needs —
+# it carries the ranges, the reasons, and the dev tooling. This file is the
+# resolved set for deploying: exact versions, runtime only, no pytest or ruff.
+#
+# It exists because not every host builds the Dockerfile. Render's native
+# Python runtime, for one, looks for this file and runs
+# `pip install -r requirements.txt`. The Docker path does not use it — the
+# image installs from pyproject.toml — so the two must be kept in step.
+#
+# To regenerate after changing pyproject.toml:
+#
+#     uv pip compile pyproject.toml -o requirements.txt
+#
+# These exact versions are the ones the test suite passes against.
+
+fastapi==0.141.1
+uvicorn[standard]==0.52.3
+firebase-admin==7.5.0
+pydantic==2.13.4
+pydantic-settings==2.15.0
+email-validator==2.3.0
+pyjwt==2.13.0
+bcrypt==5.0.0
+python-multipart==0.0.32
+slowapi==0.1.10
+openpyxl==3.1.5
+fpdf2==2.8.8
+orjson==3.11.9
+
+# Windows and slim Linux containers ship no system zoneinfo database, so
+# ZoneInfo("Asia/Kolkata") raises there without this. Monthly revenue
+# reporting depends on resolving the institute's timezone.
+tzdata==2026.3

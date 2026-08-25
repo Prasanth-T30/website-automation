@@ -17,6 +17,19 @@
 # over HTTP instead: any external scheduler can POST
 # /api/v1/automation/run?dry_run=false with the AUTOMATION_TOKEN header.
 
+# This blueprint builds the Dockerfile, which installs from pyproject.toml.
+# `backend/requirements.txt` is for the other path — Render's native Python
+# runtime, which looks for that file and ignores the Dockerfile entirely. To
+# switch, replace the three docker lines on a service with:
+#
+#     runtime: python
+#     rootDir: ./backend
+#     buildCommand: pip install -r requirements.txt
+#     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+#
+# (`backend/.python-version` pins 3.12 for that runtime.) Keep the two
+# dependency lists in step if you do; pyproject.toml stays the source of truth.
+
 services:
   - type: web
     name: dvein-hrm-api

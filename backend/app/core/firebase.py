@@ -88,6 +88,15 @@ def get_app() -> firebase_admin.App:
     if firebase_admin._apps:  # already initialised (e.g. by an earlier import)
         return firebase_admin.get_app()
 
+    # An emulator variable that is present but empty is worse than absent: the
+    # Google libraries read these straight from the environment, bypassing the
+    # settings above, and an empty value builds the target URI "dns:///" —
+    # which fails with a message that says nothing about emulators. Copying a
+    # .env into a hosting dashboard is exactly how a blank one gets there.
+    for stale in ("FIRESTORE_EMULATOR_HOST", "STORAGE_EMULATOR_HOST"):
+        if stale in os.environ and not os.environ[stale].strip():
+            del os.environ[stale]
+
     # Must be set *before* the Firestore/Storage clients are constructed —
     # both libraries read these at client-creation time, not per-request.
     if settings.firestore_emulator_host:
