@@ -7,8 +7,16 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /srv
 
 # Dependency layer first so code edits don't invalidate the install cache.
-COPY pyproject.toml ./
-RUN pip install --upgrade pip && pip install .
+#
+# From requirements.txt, not pyproject.toml: pyproject carries ranges, so
+# `pip install .` resolves whatever is newest on the day the image is built.
+# That is not reproducible, and it bit once — a build picked up a newer
+# google-cloud-firestore that percent-encoded the database id and failed every
+# query with "400 Invalid database id %28default%29", on code that had not
+# changed. requirements.txt pins the whole closure to the versions the test
+# suite passes against.
+COPY requirements.txt ./
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
