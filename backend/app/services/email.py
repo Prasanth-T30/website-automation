@@ -9,6 +9,7 @@ starts actually delivering, no code change required.
 
 from __future__ import annotations
 
+import base64
 import logging
 import re
 import smtplib
@@ -330,8 +331,9 @@ def send_email(
 ) -> bool:
     """Returns True if the email was actually sent, False if it was skipped
     or failed — callers treat this as informational, never fatal."""
-    if not settings.smtp_configured:
-        logger.warning("SMTP not configured — skipping email to %s (%s)", to_email, subject)
+    provider = settings.active_email_provider
+    if provider is None:
+        logger.warning("No mail transport configured — skipping email to %s (%s)", to_email, subject)
         return False
 
     # Structure matters here. An inline image has to sit in a `related` part
@@ -401,15 +403,60 @@ def send_email(
         message.attach(attachment)
 
     try:
-        with _connect() as smtp:
-            if settings.smtp_authenticates:
-                smtp.login(settings.smtp_username, settings.smtp_password)
-            smtp.sendmail(settings.smtp_from_email, [to_email], message.as_string())
-        logger.info("Email sent to %s (%s)", to_email, subject)
+        if provider == "resend":
+            _send_via_resend(message, to_email=to_email)
+        else:
+            with _connect() as smtp:
+                if settings.smtp_authenticates:
+                    smtp.login(settings.smtp_username, settings.smtp_password)
+                smtp.sendmail(settings.smtp_from_email, [to_email], message.as_string())
+        logger.info("Email sent to %s via %s (%s)", to_email, provider, subject)
         return True
     except Exception:
-        logger.exception("Failed to send email to %s", to_email)
+        logger.exception("Failed to send email to %s via %s", to_email, provider)
         return False
+
+
+def _send_via_resend(message: MIMEMultipart, *, to_email: str) -> None:
+    """Hand the finished MIME message to Resend over HTTPS.
+
+    Resend accepts a raw RFC-822 message, so the message built above goes out
+    byte for byte — same inline logo, same plain-text alternative, same PDF.
+    Building a second, JSON-shaped version of the same email would be a second
+    thing to keep correct.
+
+    Raises on failure; the caller turns that into `email_sent = False`.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    payload = json.dumps(
+        {
+            "from": f"{settings.smtp_from_name} <{settings.smtp_from_email}>",
+            "to": [to_email],
+            "raw": base64.b64encode(message.as_bytes()).decode("ascii"),
+        }
+    ).encode("utf-8")
+
+    request = urllib.request.Request(  # noqa: S310 - fixed https endpoint
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {settings.resend_api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310
+            response.read()
+    except urllib.error.HTTPError as exc:
+        # Resend explains refusals in the body — an unverified sending domain
+        # is the usual one, and it says so. Losing that to a bare 4xx would
+        # leave the same guessing game SMTP already put us through.
+        detail = exc.read().decode("utf-8", "replace")[:300]
+        raise RuntimeError(f"Resend rejected the message ({exc.code}): {detail}") from exc
 
 
 def verify_smtp_connection() -> tuple[bool, str]:

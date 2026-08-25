@@ -123,6 +123,21 @@ class Settings(BaseSettings):
     # ── SMTP (offer-letter / rejection emails) ──────────────────────────────
     # Left unset in dev: email sending is skipped with a warning rather than
     # failing the approve/reject action. Fill these in to actually send.
+    # ── Outgoing mail ─────────────────────────────────────────────────────
+    # How mail leaves the building.
+    #
+    #   smtp    a mail server on port 587/465. Works on Cloud Run, a VPS, a
+    #           laptop — anywhere outbound SMTP is permitted.
+    #   resend  Resend's HTTPS API. The reason this exists: most free hosting
+    #           tiers block outbound SMTP ports outright to stop spam, and the
+    #           failure is a socket error ("Network is unreachable"), not a
+    #           mail error, so no credential can fix it. Port 443 is never
+    #           blocked.
+    #   auto    resend if an API key is set, otherwise smtp. The default, so
+    #           adding a key is the only step needed to switch.
+    email_provider: Literal["auto", "smtp", "resend"] = "auto"
+    resend_api_key: str | None = None
+
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_username: str | None = None
@@ -140,6 +155,22 @@ class Settings(BaseSettings):
     #   none     — no encryption. Only for a local mail catcher in development;
     #              never against a real provider, since the password is sent.
     smtp_security: Literal["starttls", "ssl", "none"] = "starttls"
+
+    @property
+    def active_email_provider(self) -> str | None:
+        """Which transport will actually be used, or None if mail is off."""
+        if self.email_provider == "resend":
+            return "resend" if self.resend_api_key else None
+        if self.email_provider == "smtp":
+            return "smtp" if self.smtp_host else None
+        # auto
+        if self.resend_api_key:
+            return "resend"
+        return "smtp" if self.smtp_host else None
+
+    @property
+    def email_configured(self) -> bool:
+        return self.active_email_provider is not None
 
     @property
     def smtp_configured(self) -> bool:
@@ -174,7 +205,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "smtp_host", "smtp_username", "smtp_password", "automation_token",
-        "firebase_service_account_json", mode="before"
+        "firebase_service_account_json", "resend_api_key", mode="before"
     )
     @classmethod
     def _blank_smtp_field_to_none(cls, v: object) -> object:

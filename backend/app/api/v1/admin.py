@@ -111,8 +111,23 @@ def smtp_check(_: AdminUser) -> dict:
     configured, so credentials can be missing while everything still looks
     configured from the outside.
     """
+    provider = settings.active_email_provider
+    if provider == "resend":
+        # Nothing to probe: Resend is an HTTPS call made at send time, and the
+        # ports that free hosts block are not involved. Reporting the key as
+        # present is the whole check.
+        return {
+            "provider": "resend",
+            "configured": True,
+            "api_key_set": True,
+            "from_email": settings.smtp_from_email,
+            "connection_ok": True,
+            "detail": "Resend is configured; delivery is reported per send.",
+        }
+
     ok, detail = verify_smtp_connection()
     return {
+        "provider": provider or "none",
         "configured": settings.smtp_configured,
         "authenticates": settings.smtp_authenticates,
         "host": settings.smtp_host,

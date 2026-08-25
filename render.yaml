@@ -94,6 +94,16 @@ services:
         value: 10/minute;100/hour
 
       # ── Email ─────────────────────────────────────────────────────────
+      # Render's free tier blocks outbound SMTP (25/465/587) to stop spam, so
+      # a free instance cannot reach a mail server at all — the failure is
+      # "Network is unreachable" from the socket, not a rejection from the
+      # server, and no credential changes it. Set RESEND_API_KEY and mail goes
+      # over HTTPS instead, which is never blocked. The SMTP settings below
+      # are then unused, and are kept for hosts that do permit it.
+      - key: EMAIL_PROVIDER
+        value: auto
+      - key: RESEND_API_KEY
+        sync: false
       - key: SMTP_HOST
         value: smtp.gmail.com
       - key: SMTP_PORT
@@ -152,6 +162,10 @@ services:
         sync: false
       - key: REPORTING_TIMEZONE
         value: Asia/Kolkata
+      - key: EMAIL_PROVIDER
+        value: auto
+      - key: RESEND_API_KEY
+        sync: false
       - key: SMTP_HOST
         value: smtp.gmail.com
       - key: SMTP_PORT
