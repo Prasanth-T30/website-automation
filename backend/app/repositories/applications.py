@@ -53,6 +53,25 @@ def _iso(d: date) -> str:
     return d.isoformat() if isinstance(d, date) else d
 
 
+def _scoped(
+    docs: list[Application], *, owner_id: str | None, visible_to: str | None
+) -> list[Application]:
+    """Narrow a list to what the caller is allowed to see.
+
+    `owner_id` is the strict form — only this person's claims.
+
+    `visible_to` is what an HR gets: the unclaimed pool, plus their own book.
+    The pool has to stay shared or nobody could claim anything, but once a
+    colleague has claimed an applicant, that applicant is their business
+    alone. Admin passes neither and sees everything.
+    """
+    if owner_id:
+        return [a for a in docs if a.owner_id == owner_id]
+    if visible_to:
+        return [a for a in docs if a.owner_id in (None, visible_to)]
+    return docs
+
+
 class ApplicationRepository:
     def __init__(self, db: Client):
         self._db = db
@@ -64,7 +83,11 @@ class ApplicationRepository:
         return Application.from_doc(snap.id, snap.to_dict()) if snap.exists else None
 
     def list_all(
-        self, *, status: str | None = None, owner_id: str | None = None
+        self,
+        *,
+        status: str | None = None,
+        owner_id: str | None = None,
+        visible_to: str | None = None,
     ) -> list[Application]:
         # The pool stays small enough (hundreds, not millions) that filtering
         # one dimension via Firestore and the other in Python avoids needing
@@ -73,8 +96,7 @@ class ApplicationRepository:
         if status:
             query = query.where(filter=FieldFilter("status", "==", status))
         docs = [Application.from_doc(d.id, d.to_dict()) for d in query.stream()]
-        if owner_id:
-            docs = [a for a in docs if a.owner_id == owner_id]
+        docs = _scoped(docs, owner_id=owner_id, visible_to=visible_to)
         epoch = datetime.min.replace(tzinfo=UTC)
         return sorted(docs, key=lambda a: a.created_at or epoch, reverse=True)
 
@@ -83,6 +105,7 @@ class ApplicationRepository:
         *,
         status: str | None = None,
         owner_id: str | None = None,
+        visible_to: str | None = None,
         limit: int | None = None,
         cursor: str | None = None,
     ) -> Page[Application]:
@@ -101,8 +124,7 @@ class ApplicationRepository:
         raw, next_cursor = split_overfetch(raw, size)
 
         docs = [Application.from_doc(d.id, d.to_dict()) for d in raw]
-        if owner_id:
-            docs = [a for a in docs if a.owner_id == owner_id]
+        docs = _scoped(docs, owner_id=owner_id, visible_to=visible_to)
         return Page(items=docs, next_cursor=next_cursor)
 
     # ── Writes ───────────────────────────────────────────────────────────

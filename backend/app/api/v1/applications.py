@@ -51,18 +51,31 @@ def list_applications(
     response: Response = None,  # noqa: B008 - FastAPI injects this
 ) -> list[ApplicationOut]:
     owner_id = user.id if mine else None
+    # An HR sees the unclaimed pool and their own claims — never a colleague's
+    # applicant. The pool has to stay shared or nobody could claim anything,
+    # but a claimed applicant belongs to whoever took them: their name, phone,
+    # fee and progress are not the rest of the team's business. Admin oversees
+    # everyone, so passes neither filter.
+    #
+    # This matches /students, which has always scoped this way; applications
+    # did not, so every HR could read the whole book from the Approved tab.
+    visible_to = None if user.role is UserRole.admin else user.id
+
     # Opt-in, for the same reason as /students: the console derives totals
     # from this list, so quietly serving one page would make them wrong rather
     # than merely slow.
     if limit is not None:
         page = applications.list_page(
-            status=status_filter, owner_id=owner_id, limit=limit, cursor=cursor
+            status=status_filter, owner_id=owner_id, visible_to=visible_to,
+            limit=limit, cursor=cursor,
         )
         if response is not None and page.next_cursor:
             response.headers["X-Next-Cursor"] = page.next_cursor
         return [ApplicationOut.model_validate(a) for a in page.items]
 
-    rows = applications.list_all(status=status_filter, owner_id=owner_id)
+    rows = applications.list_all(
+        status=status_filter, owner_id=owner_id, visible_to=visible_to
+    )
     return [ApplicationOut.model_validate(a) for a in rows]
 
 
