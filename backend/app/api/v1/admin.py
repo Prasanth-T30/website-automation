@@ -16,6 +16,7 @@ from app.api.deps import AdminUser, ApplicationRepo, PaymentRepo, StudentRepo, U
 from app.core.config import settings
 from app.models.user import UserRole
 from app.schemas.admin import HrPerformanceOut
+from app.services.email import verify_smtp_connection
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -93,3 +94,33 @@ def hr_performance(
             )
         )
     return sorted(rows, key=lambda r: r.revenue_all_time, reverse=True)
+
+
+@router.get("/smtp-check")
+def smtp_check(_: AdminUser) -> dict:
+    """Whether outgoing mail is actually configured, and whether it connects.
+
+    Sending is best-effort by design: a document is filed whether or not the
+    mail server was reachable, and the console reports which happened. That is
+    the right behaviour, but it leaves "the email could not be sent" with no
+    way to find out why on a host where there is no shell to run
+    `python -m app.cli smtp-check` in.
+
+    Admin-only, and never returns the password — only whether one is set. The
+    distinction matters: the host alone decides whether the app considers mail
+    configured, so credentials can be missing while everything still looks
+    configured from the outside.
+    """
+    ok, detail = verify_smtp_connection()
+    return {
+        "configured": settings.smtp_configured,
+        "authenticates": settings.smtp_authenticates,
+        "host": settings.smtp_host,
+        "port": settings.smtp_port,
+        "security": settings.smtp_security,
+        "username": settings.smtp_username,
+        "password_set": bool(settings.smtp_password),
+        "from_email": settings.smtp_from_email,
+        "connection_ok": ok,
+        "detail": detail,
+    }
