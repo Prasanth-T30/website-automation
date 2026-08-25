@@ -22,6 +22,8 @@ import os
 from functools import lru_cache
 
 import firebase_admin
+import google.auth
+import google.auth.exceptions
 from firebase_admin import credentials, firestore, storage
 from google.auth.credentials import AnonymousCredentials
 from google.cloud.firestore import Client as FirestoreClient
@@ -131,9 +133,29 @@ def get_app() -> firebase_admin.App:
     if settings.firestore_emulator_host or settings.firebase_storage_emulator_host:
         return firebase_admin.initialize_app(_EmulatorCredential(), options)
 
-    # Neither a service account nor an emulator host is configured — this is
-    # a genuine misconfiguration, so fail loudly via real ADC resolution
-    # rather than silently defaulting to an emulator credential in production.
+    # Nothing explicit was configured, so fall back to the ambient identity.
+    # That is correct on Cloud Run, App Engine or GCE, where the platform
+    # supplies one. Anywhere else — Render, Railway, Fly, a laptop — there is
+    # none, and the Admin SDK only discovers that lazily, on the first query.
+    #
+    # Left alone, the failure surfaces as a 500 from whichever endpoint first
+    # touched the database, while /health and anything not using Firestore
+    # keep returning 200. That looks like a working deploy with one broken
+    # feature, rather than what it is: no database credential at all.
+    #
+    # Resolving it here turns that into a startup failure naming the variable
+    # to set, which a deploy log shows plainly.
+    try:
+        google.auth.default()
+    except google.auth.exceptions.DefaultCredentialsError as exc:
+        raise RuntimeError(
+            "No Firebase credential and no ambient Google identity. "
+            "Set FIREBASE_SERVICE_ACCOUNT_JSON to the service-account key "
+            "(raw JSON, or base64 if the dashboard mangles newlines), or "
+            "FIREBASE_SERVICE_ACCOUNT_PATH to a key file. Only Google-hosted "
+            f"runtimes can omit both. Underlying error: {exc}"
+        ) from exc
+
     return firebase_admin.initialize_app(options=options)
 
 
