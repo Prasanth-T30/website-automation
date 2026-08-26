@@ -37,6 +37,7 @@ from app.schemas.student import (
     CertificateFields,
     CertificateIssueRequest,
     CertificateIssueResult,
+    CertificateLookup,
     MentorOut,
     OfferCandidate,
     OfferLetterDraft,
@@ -54,6 +55,7 @@ from app.services.documents import offer_letter_fields as _offer_letter_fields
 from app.services.pdf_certificate import (
     build_certificate_pdf,
     certificate_filename,
+    certificate_number,
 )
 from app.services.pdf_offer_letter import (
     build_offer_letter_pdf,
@@ -542,6 +544,58 @@ def certificate_candidates(
     return sorted(
         rows,
         key=lambda r: (r.already_issued, r.days_remaining if r.days_remaining is not None else 999),
+    )
+
+
+@router.get("/certificate/lookup", response_model=CertificateLookup)
+def certificate_lookup(
+    students: StudentRepo,
+    reports: ReportRepo,
+    _: ActiveUser,
+    number: str = Query(..., min_length=4, max_length=40, description="e.g. DVN-CERT-7F3A91C2"),
+) -> CertificateLookup:
+    """Resolve a certificate number printed on a document.
+
+    For the call that starts "someone has handed me this, is it real?". Any
+    signed-in member of staff can answer it, not only the student's own HR —
+    a verification nobody happens to be available for is no verification.
+
+    What comes back is deliberately thin: the name, the programme, and
+    whether a certificate was actually issued. No email, no phone, no fees.
+    The question is whether the document is genuine, not who the person is.
+
+    `student_found` and `issued` are separate answers on purpose. The number
+    is derived from the student's record id, so it is computable for anyone
+    ever enrolled — someone could quote a number for a real student who was
+    never certified. Only a filed document proves issuance.
+    """
+    wanted = number.strip().upper()
+    student = next(
+        (s for s in students.list_all() if certificate_number(s) == wanted), None
+    )
+    if student is None:
+        return CertificateLookup(
+            certificate_number=wanted, student_found=False, issued=False
+        )
+
+    # The filed documents are the record of what actually went out.
+    filed = [
+        r for r in reports.list_all(category="certificate") if r.student_id == student.id
+    ]
+    first = min((r.created_at for r in filed if r.created_at), default=None)
+
+    return CertificateLookup(
+        certificate_number=wanted,
+        student_found=True,
+        issued=bool(filed),
+        name=student.name,
+        college=student.college,
+        category=student.category,
+        domain=student.domain,
+        duration=student.duration,
+        status=student.status,
+        issued_on=first,
+        issued_count=len(filed),
     )
 
 

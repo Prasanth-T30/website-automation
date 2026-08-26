@@ -4,6 +4,7 @@ import {
   FileSignature,
   FileText,
   Receipt,
+  Search,
   Send,
   Trash2,
   Upload,
@@ -96,6 +97,7 @@ export default function Reports() {
         {/* The offer-letter tab does two jobs: it sends new letters, and
             below that it lists the ones already filed. */}
         {tab === "offer_letter" && <OfferLetterPanel />}
+        {tab === "certificate" && <CertificateLookup />}
         {tab === "certificate" && <CertificatePanel />}
 
         {reports.isPending && <LoadingState label="Loading files…" />}
@@ -272,6 +274,126 @@ function UploadDialog({ open, onOpenChange, students }) {
  * certificate is ready when they finish rather than whenever someone
  * remembers. The review-and-send half is the shared dialog.
  */
+/**
+ * Check a certificate number someone has been handed.
+ *
+ * The number is printed under every certificate, and this is where a call
+ * that starts "is this real?" gets answered. Any signed-in member of staff
+ * can use it, not only the student's own HR — a check nobody is available
+ * for is no check at all.
+ *
+ * It reports two things separately, because they are not the same: whether
+ * the number matches a student, and whether a certificate was actually
+ * issued to them. The number is derived from the student's record id, so it
+ * is computable for anyone ever enrolled — a match alone proves nothing.
+ */
+function CertificateLookup() {
+  const [number, setNumber] = useState("");
+  const [submitted, setSubmitted] = useState("");
+
+  const result = useQuery({
+    queryKey: ["certificate-lookup", submitted],
+    queryFn: () => studentsApi.certificateLookup(submitted),
+    enabled: submitted.length > 0,
+    retry: false,
+  });
+
+  const found = result.data;
+
+  return (
+    <Card>
+      <CardBody className="flex flex-col gap-3">
+        <div>
+          <h3 className="text-sm font-bold text-fg">Check a certificate</h3>
+          <p className="mt-0.5 text-xs text-fg-muted">
+            Paste the number printed under a certificate to see who it was issued to.
+          </p>
+        </div>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setSubmitted(number.trim().toUpperCase());
+          }}
+          className="flex flex-wrap items-center gap-2"
+        >
+          <Input
+            value={number}
+            onChange={(e) => setNumber(e.target.value)}
+            placeholder="DVN-CERT-7F3A91C2"
+            className="max-w-xs font-mono"
+            aria-label="Certificate number"
+          />
+          <Button type="submit" variant="secondary" disabled={!number.trim()}>
+            <Search className="size-3.5" aria-hidden /> Check
+          </Button>
+        </form>
+
+        {result.isFetching && <LoadingState label="Checking…" />}
+
+        {result.isError && (
+          <p className="rounded-md border border-danger/30 bg-danger-subtle px-3 py-2 text-xs text-danger-text">
+            {result.error instanceof ApiError
+              ? result.error.detail
+              : "Could not check that number."}
+          </p>
+        )}
+
+        {found && !found.student_found && (
+          <p className="rounded-md border border-danger/30 bg-danger-subtle px-3 py-2 text-xs text-danger-text">
+            <strong className="font-mono">{found.certificate_number}</strong> does not match any
+            student. Treat the document as unverified.
+          </p>
+        )}
+
+        {found?.student_found && (
+          <div
+            className={cn(
+              "rounded-md border p-3",
+              found.issued
+                ? "border-success/30 bg-success-subtle"
+                : "border-warn/30 bg-warn-subtle",
+            )}
+          >
+            <p
+              className={cn(
+                "text-xs font-bold",
+                found.issued ? "text-success-text" : "text-warn-text",
+              )}
+            >
+              {found.issued
+                ? "Genuine — a certificate was issued for this number."
+                : "This number matches a student, but no certificate has been issued to them."}
+            </p>
+
+            <dl className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+              {[
+                ["Name", found.name],
+                ["College", found.college],
+                ["Programme", [found.domain, found.category].filter(Boolean).join(" · ")],
+                ["Duration", found.duration],
+                ["Enrolment", found.status],
+                [
+                  "Issued",
+                  found.issued_on
+                    ? shortDate(found.issued_on) +
+                      (found.issued_count > 1 ? ` · ${found.issued_count} copies` : "")
+                    : "—",
+                ],
+              ].map(([label, value]) => (
+                <div key={label} className="contents">
+                  <dt className="text-fg-muted">{label}</dt>
+                  <dd className="font-medium text-fg capitalize">{value || "—"}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  );
+}
+
 function CertificatePanel() {
   const [selected, setSelected] = useState(null);
   const [query, setQuery] = useState("");

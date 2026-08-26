@@ -11,6 +11,8 @@ export const studentsApi = {
 
   /** Students whose certificate is due, or falls due within `within_days`. */
   certificateCandidates: (params) => api.get("/students/certificate/candidates", params),
+  /** Resolve a certificate number printed on a document. */
+  certificateLookup: (number) => api.get("/students/certificate/lookup", { number }),
   /** Who may sign a certificate. `domain` only orders the list. */
   certificateMentors: (domain) =>
     api.get("/students/certificate/mentors", domain ? { domain } : undefined),

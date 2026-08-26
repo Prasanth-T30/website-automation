@@ -137,6 +137,34 @@ class MentorOut(BaseModel):
     teaches_domain: bool = False
 
 
+class CertificateLookup(BaseModel):
+    """What a certificate number resolves to.
+
+    Two different questions, answered separately. `student_found` says the
+    number matches a real record; `issued` says a certificate was actually
+    generated and filed for them. The number is derived from the student's id,
+    so it is computable for anyone enrolled — which means a match alone is not
+    proof that a certificate was ever issued, and the two must not be
+    conflated when someone is checking a document they were handed.
+    """
+
+    certificate_number: str
+    student_found: bool
+    issued: bool
+
+    # Only ever the detail a verifier needs: who it names and what they did.
+    # Never contact details or fees — this answers "is this document real",
+    # not "tell me about this person".
+    name: str | None = None
+    college: str | None = None
+    category: str | None = None
+    domain: str | None = None
+    duration: str | None = None
+    status: str | None = None
+    issued_on: datetime | None = None
+    issued_count: int = 0
+
+
 class CertificateCandidate(BaseModel):
     """One student whose certificate is due, or nearly due.
 
