@@ -78,20 +78,23 @@ def test_nobody_carries_a_job_title():
     assert {m.title for m in MENTORS} == {MENTOR_TITLE}
 
 
-# ── ordering, not filtering ──────────────────────────────────────────────
+# ── who is offered ───────────────────────────────────────────────────────
 
 
-def test_the_domains_mentors_come_first():
-    ordered = mentors_for("Software Testing")
-    assert ordered[0].name == "Mohamed Arsal"
+def test_only_the_domains_mentors_are_offered():
+    """Offering all thirteen made the right answer something to hunt for."""
+    offered = {m.name for m in mentors_for("Software Testing")}
+    assert offered == {"Mohamed Arsal"}
 
 
-def test_but_everyone_stays_selectable():
-    """Who actually taught a cohort is not something the table can know."""
-    assert len(mentors_for("Software Testing")) == len(MENTORS)
+def test_a_domain_with_several_mentors_offers_all_of_them():
+    offered = {m.name for m in mentors_for("Data Science and AI")}
+    assert offered == {"Muniyappan", "Sahana", "Suriya"}
 
 
-def test_an_unknown_domain_still_offers_everyone():
+def test_an_unknown_domain_falls_back_to_everyone():
+    """Older records carry domain names the table has never heard of, and an
+    empty dropdown would leave the certificate unsignable."""
     assert len(mentors_for("Something We Never Taught")) == len(MENTORS)
     assert len(mentors_for(None)) == len(MENTORS)
 

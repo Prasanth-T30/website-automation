@@ -304,17 +304,20 @@ MENTORS: tuple[Mentor, ...] = (
 
 
 def mentors_for(domain: str | None) -> list[Mentor]:
-    """Mentors to offer for a domain, the ones who teach it first.
+    """The mentors who teach a domain.
 
-    Everyone stays selectable: a student may have been taught by someone the
-    table does not list against their domain, and a certificate should never
-    be blocked by that.
+    Only them: offering all thirteen for a Software Testing certificate made
+    the one right answer something to hunt for, and the wrong ones just as
+    easy to pick by accident.
+
+    Falls back to everyone when the domain is unknown or has nobody assigned
+    — an older record may carry a domain name the table has never heard of,
+    and an empty dropdown would leave the certificate unsignable.
     """
     if not domain:
         return list(MENTORS)
     teaches = [m for m in MENTORS if domain in m.domains]
-    rest = [m for m in MENTORS if domain not in m.domains]
-    return teaches + rest
+    return teaches or list(MENTORS)
 
 
 def mentor_by_id(mentor_id: str | None) -> Mentor | None:

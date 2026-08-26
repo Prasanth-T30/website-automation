@@ -346,11 +346,11 @@ export function IssueDocumentDialog({
                       {(mentors.data ?? []).map((m) => (
                         <option key={m.id} value={m.id}>
                           {m.name}
-                          {/* Every mentor signs as "Mentor", so the title says
-                              nothing here. What is worth marking is who
-                              teaches this domain — without limiting the
-                              choice to them. */}
-                          {m.teaches_domain ? "  ·  teaches this domain" : ""}
+                          {/* The list is already the mentors for this domain,
+                              so saying so on each row would be noise. The
+                              marker only earns its place when the domain is
+                              unknown and everyone is being offered. */}
+                          {m.teaches_domain ? "" : "  ·  other domains"}
                         </option>
                       ))}
                     </select>
