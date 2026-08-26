@@ -22,10 +22,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fpdf import FPDF
+from PIL import Image
 
+from app.core.constants import MENTOR_TITLE
 from app.models.student import Student
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+# One file per mentor, named after their id in MENTORS.
+SIGNATURES_DIR = ASSETS_DIR / "signatures"
 TEMPLATE_PATH = ASSETS_DIR / "certificate_bg.jpg"
 
 PAGE_W, PAGE_H = 842.25, 595.5
@@ -45,6 +49,25 @@ NAME_SIZE = 20.0
 # would run into the signature, so the type shrinks rather than overflowing.
 MAX_BODY_LINES = 4
 BODY_MAX_WIDTH = 720.0
+
+# The empty rule to the right of the institute's own signature, measured from
+# the artwork: it runs x 478.5 to 683.9 at y 503.4, with an ornament through
+# the middle. The mentor who taught the programme signs here.
+MENTOR_RULE_MID = 581.2
+MENTOR_RULE_Y = 503.4
+# Usable width between the rule's ends, less a little breathing room.
+MENTOR_RULE_W = 195.0
+# Matching the baked-in block on the left, so the two read as a pair.
+MENTOR_NAME_BASELINE = 521.6
+MENTOR_TITLE_BASELINE = 537.0
+# Signatures are scans of whatever people wrote on whatever paper, so their
+# proportions vary from nearly square to very wide. Fitting inside a box
+# rather than to a fixed width keeps a tall one from climbing into the body
+# text, and a wide one from overrunning the rule.
+MENTOR_SIGNATURE_W = 96.0
+MENTOR_SIGNATURE_H = 38.0
+# Sits on the rule rather than floating above it.
+MENTOR_SIGNATURE_BOTTOM_GAP = 3.0
 
 INK = (26, 26, 26)
 MUTED = (120, 120, 120)
@@ -151,11 +174,15 @@ def _wrap_styled(
     return lines
 
 
-def build_certificate_pdf(student: Student, batch=None) -> bytes:
+def build_certificate_pdf(student: Student, batch=None, mentor=None) -> bytes:
     """Render the certificate for one student.
 
     `batch` is accepted so callers need not special-case an unassigned
     student; the supplied design carries no date fields, so it is unused.
+
+    `mentor` signs the empty rule on the right. Optional, because a domain
+    may have nobody assigned yet and a missing mentor must not stop a
+    certificate being issued — the rule simply stays blank, as it is today.
     """
     # Explicit page dimensions only — passing orientation="L" alongside a
     # format tuple makes fpdf2 swap width and height back to portrait.
@@ -228,7 +255,37 @@ def build_certificate_pdf(student: Student, batch=None) -> bytes:
             x += pdf.get_string_width(word + " ")
         baseline += LINE_HEIGHT
 
-    # ── Reference line, under the unused right-hand rule ─────────────────
+    # ── The mentor who taught the programme, on the right-hand rule ──────
+    if mentor is not None:
+        signature = SIGNATURES_DIR / mentor.signature if mentor.signature else None
+        if signature is not None and signature.exists():
+            with Image.open(signature) as img:
+                scale = min(MENTOR_SIGNATURE_W / img.width, MENTOR_SIGNATURE_H / img.height)
+                width, height = img.width * scale, img.height * scale
+            pdf.image(
+                str(signature),
+                x=MENTOR_RULE_MID - width / 2,
+                y=MENTOR_RULE_Y - MENTOR_SIGNATURE_BOTTOM_GAP - height,
+                w=width,
+            )
+
+        pdf.set_text_color(*INK)
+        name = _latin1(mentor.name)
+        # "Ahamed Yasik Sarvaththudeen M" is wider than the rule at 11pt, so
+        # the name shrinks to fit rather than running into the border.
+        size = 11.0
+        pdf.set_font("Helvetica", "", size)
+        while size > 7 and pdf.get_string_width(name) > MENTOR_RULE_W:
+            size -= 0.5
+            pdf.set_font("Helvetica", "", size)
+        pdf.text(MENTOR_RULE_MID - pdf.get_string_width(name) / 2, MENTOR_NAME_BASELINE, name)
+
+        # Every mentor signs as "Mentor" — no job titles on a certificate.
+        pdf.set_font("Helvetica", "B", 11)
+        title = _latin1(MENTOR_TITLE)
+        pdf.text(MENTOR_RULE_MID - pdf.get_string_width(title) / 2, MENTOR_TITLE_BASELINE, title)
+
+    # ── Reference line, under the right-hand rule ────────────────────────
     # The email tells the student their certificate number is printed here, so
     # it has to actually be on the page.
     pdf.set_font("Helvetica", "", 8)

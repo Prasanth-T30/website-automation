@@ -28,6 +28,7 @@ from app.api.deps import (
     StudentRepo,
     UserRepo,
 )
+from app.core.constants import mentor_by_id, mentors_for
 from app.models.student import Student
 from app.models.user import UserRole
 from app.schemas.student import (
@@ -36,6 +37,7 @@ from app.schemas.student import (
     CertificateFields,
     CertificateIssueRequest,
     CertificateIssueResult,
+    MentorOut,
     OfferCandidate,
     OfferLetterDraft,
     OfferLetterFields,
@@ -466,6 +468,11 @@ def _days_remaining(end_date: str | None) -> int | None:
         return None
 
 
+def _chosen_mentor(overrides: CertificateFields | None):
+    """The mentor the HR picked, or None to leave the rule unsigned."""
+    return mentor_by_id(overrides.mentor_id) if overrides else None
+
+
 def _certificate_student(student: Student, overrides: CertificateFields | None) -> Student:
     """The student as this certificate should describe them.
 
@@ -474,7 +481,13 @@ def _certificate_student(student: Student, overrides: CertificateFields | None) 
     """
     if overrides is None:
         return student
-    edits = {k: v for k, v in overrides.model_dump(exclude_none=True).items() if v != ""}
+    # mentor_id describes who signs, not the student, so it never reaches the
+    # record copy — dataclasses.replace would reject the unknown field.
+    edits = {
+        k: v
+        for k, v in overrides.model_dump(exclude_none=True, exclude={"mentor_id"}).items()
+        if v != ""
+    }
     return dataclasses.replace(student, **edits) if edits else student
 
 
@@ -532,6 +545,29 @@ def certificate_candidates(
     )
 
 
+@router.get("/certificate/mentors", response_model=list[MentorOut])
+def certificate_mentors(
+    _: ActiveUser,
+    domain: str | None = Query(
+        None, description="Order the list for this domain, listing its mentors first."
+    ),
+) -> list[MentorOut]:
+    """Who may sign a certificate.
+
+    A domain can be taught by more than one mentor, so the console offers the
+    list and an HR picks whoever actually taught the student. Passing the
+    domain only orders it — every mentor stays selectable, because the person
+    who taught a given cohort is not something this table can know.
+    """
+    return [
+        MentorOut(
+            id=m.id, name=m.name, title=m.title,
+            teaches_domain=bool(domain) and domain in m.domains,
+        )
+        for m in mentors_for(domain)
+    ]
+
+
 @router.get("/{student_id}/certificate/draft", response_model=CertificateDraft)
 def certificate_draft(
     student_id: str,
@@ -546,7 +582,15 @@ def certificate_draft(
         subject=f"{email.CERTIFICATE_SUBJECT} — {student.domain}",
         body=email.completion_body_text(name=student.name),
         fields=CertificateFields(
-            name=student.name, category=student.category, domain=student.domain
+            name=student.name,
+            category=student.category,
+            domain=student.domain,
+            # Suggested, not decided: the first mentor listed for this domain,
+            # which the HR can change to whoever actually taught the cohort.
+            mentor_id=next(
+                (m.id for m in mentors_for(student.domain) if student.domain in m.domains),
+                None,
+            ),
         ),
     )
 
@@ -571,7 +615,7 @@ def preview_edited_certificate(
     awardee = _certificate_student(student, data.fields)
     batch = batches.get(student.batch_id) if student.batch_id else None
     return StreamingResponse(
-        io.BytesIO(build_certificate_pdf(awardee, batch)),
+        io.BytesIO(build_certificate_pdf(awardee, batch, _chosen_mentor(data.fields))),
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{certificate_filename(awardee)}"'},
     )
@@ -618,6 +662,7 @@ def issue_certificate(
         student=student,
         awardee=_certificate_student(student, data.fields),
         batch=batches.get(student.batch_id) if student.batch_id else None,
+        mentor=_chosen_mentor(data.fields),
         subject=data.subject or None,
         body=data.body or None,
         storage=storage,

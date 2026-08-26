@@ -49,7 +49,11 @@ include = ["app*"]
 # told otherwise, so without this the installed package looks complete and
 # then raises a missing-file error the first time an HR sends a letter.
 [tool.setuptools.package-data]
-app = ["assets/*"]
+# Recursive: the mentor signatures live in assets/signatures/, and a
+# single-level glob would ship the letterhead but not them — leaving every
+# certificate unsigned in a wheel-installed deployment while working fine
+# from a source checkout.
+app = ["assets/*", "assets/**/*"]
 
 [dependency-groups]
 dev = [

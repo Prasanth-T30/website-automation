@@ -158,6 +158,7 @@ def issue_certificate(
     student: Student,
     awardee: Student,
     batch,
+    mentor=None,
     subject: str | None,
     body: str | None,
     storage,
@@ -167,12 +168,14 @@ def issue_certificate(
 ) -> IssueResult:
     """Render, file and email one certificate.
 
+    `mentor` signs the right-hand rule; None leaves it blank.
+
     `awardee` is the student as this certificate should describe them — a copy
     carrying any corrections. `student` stays the record it was issued
     against, so the certificate number and the audit trail follow the
     enrolment rather than the correction.
     """
-    pdf_bytes = build_certificate_pdf(awardee, batch)
+    pdf_bytes = build_certificate_pdf(awardee, batch, mentor)
     filename = certificate_filename(awardee)
 
     report = _file(

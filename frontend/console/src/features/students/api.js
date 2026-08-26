@@ -11,6 +11,9 @@ export const studentsApi = {
 
   /** Students whose certificate is due, or falls due within `within_days`. */
   certificateCandidates: (params) => api.get("/students/certificate/candidates", params),
+  /** Who may sign a certificate. `domain` only orders the list. */
+  certificateMentors: (domain) =>
+    api.get("/students/certificate/mentors", domain ? { domain } : undefined),
   /** The certificate's current field values plus the covering email. */
   certificateDraft: (id) => api.get(`/students/${id}/certificate/draft`),
   /** The certificate as a PDF blob, with the HR's edits applied. Nothing is sent. */

@@ -112,6 +112,10 @@ class CertificateFields(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=100)
     category: str | None = Field(default=None, max_length=40)
     domain: str | None = Field(default=None, max_length=120)
+    # Who signs the right-hand rule. A domain can be taught by several
+    # mentors, so this is the HR's choice rather than something derived from
+    # the domain. Unset leaves the rule blank, as it was before.
+    mentor_id: str | None = Field(default=None, max_length=40)
 
     @field_validator("domain")
     @classmethod
@@ -119,6 +123,18 @@ class CertificateFields(BaseModel):
         if v in (None, ""):
             return None
         return canonical_domain(v) or v
+
+
+class MentorOut(BaseModel):
+    """One mentor the console may offer as a signatory."""
+
+    id: str
+    name: str
+    title: str
+    # Whether this mentor is listed for the domain being certified. The
+    # console sorts these first and marks them, so an HR picking for an
+    # unfamiliar domain can see who normally teaches it.
+    teaches_domain: bool = False
 
 
 class CertificateCandidate(BaseModel):

@@ -234,6 +234,95 @@ COMPANY_ADDRESS_LINES = (
 )
 COMPANY_FULL_ADDRESS = "3rd Floor, Gamma Block, SSPDL - Alpha City, Navalur, Chennai - 600 130"
 
+# ── Mentors ──────────────────────────────────────────────────────────────
+# Who signs a completion certificate, on the empty rule to the right of the
+# institute's own signature.
+#
+# A domain can be taught by more than one mentor, so this is not a lookup —
+# the console offers the mentors for the student's domain and an HR picks the
+# one who actually taught them. `domains` therefore orders the dropdown; it
+# never limits the choice, because which mentor taught a given cohort is not
+# something this table can know.
+#
+# Nobody carries a job title here. Every certificate says "Mentor" under the
+# name, so the word lives in MENTOR_TITLE rather than being repeated thirteen
+# times and drifting.
+#
+# Signatures are fixed assets in app/assets/signatures/, not uploads: there
+# are a handful of mentors, they change rarely, and keeping them in the image
+# means no Storage round trip when a certificate renders. Each file is named
+# after the mentor's id below. A missing file is not an error — the name and
+# "Mentor" still print, which beats a broken image or a blocked certificate.
+
+
+MENTOR_TITLE = "Mentor"
+
+
+@dataclass(frozen=True)
+class Mentor:
+    id: str
+    name: str
+    # Filename within app/assets/signatures/.
+    signature: str
+    domains: tuple[str, ...]
+
+    @property
+    def title(self) -> str:
+        return MENTOR_TITLE
+
+
+MENTORS: tuple[Mentor, ...] = (
+    Mentor("ahamed-yasik", "Ahamed Yasik Sarvaththudeen M", "ahamed-yasik.png",
+           ("Full Stack Python", "DevOps", "Cloud Computing")),
+    Mentor("aruna-devi", "Aruna Devi", "aruna-devi.png",
+           ("HR - Operations", "HR - Marketing", "HR - Finance & Accounting")),
+    Mentor("jayasri", "Jayasri", "jayasri.png",
+           ("HR - Operations", "HR - Marketing", "HR - Finance & Accounting")),
+    Mentor("koorinivash", "Koorinivash", "koorinivash.png",
+           ("Full Stack Python", "IOT")),
+    Mentor("mohamed-arsal", "Mohamed Arsal", "mohamed-arsal.png",
+           ("Software Testing",)),
+    Mentor("muniyappan", "Muniyappan", "muniyappan.png",
+           ("Data Analytics", "Data Science and AI")),
+    Mentor("navin", "Navin", "navin.png",
+           ("Full Stack Java", "MERN Stack", "Web Development")),
+    Mentor("prasanth", "Prasanth", "prasanth.png",
+           ("Full Stack Python", "Web Development", "UI/UX Design and Prototyping")),
+    Mentor("sahana", "Sahana", "sahana.png",
+           ("Data Science and AI", "Cybersecurity", "Embedded Systems",
+            "Big Data Analytics", "AI & Machine Learning")),
+    Mentor("sasikumar", "Sasikumar", "sasikumar.png",
+           ("Digital Marketing",)),
+    Mentor("selvamani", "Selvamani", "selvamani.png",
+           ("Full Stack Java", "MERN Stack")),
+    Mentor("sidharraj", "Sidharraj", "sidharraj.png",
+           ("Business Analytics", "Data Analytics")),
+    Mentor("suriya", "Suriya", "suriya.png",
+           ("Data Science and AI", "Cybersecurity", "Embedded Systems",
+            "Big Data Analytics", "AI & Machine Learning")),
+)
+
+
+def mentors_for(domain: str | None) -> list[Mentor]:
+    """Mentors to offer for a domain, the ones who teach it first.
+
+    Everyone stays selectable: a student may have been taught by someone the
+    table does not list against their domain, and a certificate should never
+    be blocked by that.
+    """
+    if not domain:
+        return list(MENTORS)
+    teaches = [m for m in MENTORS if domain in m.domains]
+    rest = [m for m in MENTORS if domain not in m.domains]
+    return teaches + rest
+
+
+def mentor_by_id(mentor_id: str | None) -> Mentor | None:
+    if not mentor_id:
+        return None
+    return next((m for m in MENTORS if m.id == mentor_id), None)
+
+
 SIGNATORY_NAME = "Sahana Ramamoorthi"
 SIGNATORY_TITLE = "Executive Head & AI Engineer"
 # The offer letter's own signature block uses the shorter form.

@@ -53,6 +53,10 @@ export const CERTIFICATE = {
     { key: "name", label: "Name" },
     { key: "category", label: "Category", choices: "categories" },
     { key: "domain", label: "Domain", choices: "domains" },
+    // Who signs the right-hand rule. A domain may be taught by several
+    // mentors, so this is picked rather than derived — the list is merely
+    // ordered by domain.
+    { key: "mentor_id", label: "Signed by", mentors: true },
   ],
 };
 
@@ -143,6 +147,17 @@ export function IssueDocumentDialog({
   useEffect(() => {
     if (source.data && draft === null) setDraft(draftFrom(source.data));
   }, [source.data, draft]);
+
+  /* Only the certificate has a signatory, and only while it is being edited.
+     Ordered by the domain currently on the document, so changing the domain
+     re-sorts who is offered. */
+  const wantsMentors = kind.fields.some((f) => f.mentors);
+  const mentors = useQuery({
+    queryKey: ["students", "certificate-mentors", draft?.fields?.domain ?? null],
+    queryFn: () => studentsApi.certificateMentors(draft?.fields?.domain),
+    enabled: editing && wantsMentors,
+    staleTime: 5 * 60_000,
+  });
 
   /* The preview re-renders only when the document's own fields change:
      retyping the email body must not cost a PDF round trip. */
@@ -321,7 +336,25 @@ export function IssueDocumentDialog({
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {kind.fields.map((f) => (
                 <Field key={f.key} label={f.label}>
-                  {f.choices ? (
+                  {f.mentors ? (
+                    <select
+                      className={selectClass}
+                      value={draft.fields[f.key] ?? ""}
+                      onChange={(e) => setField(f.key, e.target.value)}
+                    >
+                      <option value="">— Leave unsigned —</option>
+                      {(mentors.data ?? []).map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                          {/* Every mentor signs as "Mentor", so the title says
+                              nothing here. What is worth marking is who
+                              teaches this domain — without limiting the
+                              choice to them. */}
+                          {m.teaches_domain ? "  ·  teaches this domain" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  ) : f.choices ? (
                     <select
                       className={selectClass}
                       value={draft.fields[f.key] ?? ""}
