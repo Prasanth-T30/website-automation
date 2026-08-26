@@ -53,6 +53,11 @@ BODY_MAX_WIDTH = 720.0
 # The empty rule to the right of the institute's own signature, measured from
 # the artwork: it runs x 478.5 to 683.9 at y 503.4, with an ornament through
 # the middle. The mentor who taught the programme signs here.
+# The reference line's right edge. The border's navy corner cuts in to x=700
+# at this height, so the line stops short of it.
+REFERENCE_RIGHT = 690.0
+REFERENCE_BASELINE = 572.0
+
 MENTOR_RULE_MID = 581.2
 MENTOR_RULE_Y = 503.4
 # Usable width between the rule's ends, less a little breathing room.
@@ -292,6 +297,11 @@ def build_certificate_pdf(student: Student, batch=None, mentor=None) -> bytes:
     pdf.set_text_color(*MUTED)
     issued = datetime.now(UTC).strftime("%d %b %Y")
     ref = _latin1(f"{certificate_number(student)}   |   Issued {issued}")
-    pdf.text(632 - pdf.get_string_width(ref) / 2, 572, ref)
+    # Right-aligned, not centred on a fixed point. Centred on x=632 it ran to
+    # x=716 while the paper ends at x=700 at this height — the last characters
+    # of the year fell onto the navy corner, where grey on dark blue is
+    # unreadable. The date's width varies ("6 Aug" against "26 Aug"), so
+    # pinning the right edge is what actually keeps it on the paper.
+    pdf.text(REFERENCE_RIGHT - pdf.get_string_width(ref), REFERENCE_BASELINE, ref)
 
     return bytes(pdf.output())
