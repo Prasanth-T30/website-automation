@@ -1,5 +1,5 @@
 /**
- * Typed fetch wrapper for the Dvein HRM API.
+ * Typed fetch wrapper for the DVein HRM API.
  *
  * Auth rides on httpOnly cookies, so every request sends credentials and
  * mutations carry the double-submit CSRF token. Tokens are never read from or

@@ -11,6 +11,7 @@
  * @property {string} description
  * @property {number} urgency  Higher sorts first.
  * @property {string | null} created_at
+ * @property {string | null} link  Console path this alert refers to.
  */
 
 export {};

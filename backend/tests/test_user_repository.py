@@ -140,7 +140,7 @@ def test_update_email_moves_the_index(repo: UserRepository):
         email="old@dvein.in", full_name="Email Mover", password_hash="h", role=UserRole.hr,
         phone=None, must_change_password=False,
     )
-    repo.update_email(user.id, "New@Dvein.In")
+    repo.update_email(user.id, "New@DVein.In")
 
     assert repo.get(user.id).email == "new@dvein.in"
     assert repo.get_by_email("new@dvein.in") is not None

@@ -1,4 +1,4 @@
-"""Certificate of Appreciation, composed onto Dvein's supplied design.
+"""Certificate of Appreciation, composed onto DVein's supplied design.
 
 The border, title, logo, seal and signature live in the background artwork, so
 they are not extractable text — these assert on the layer this code actually
@@ -86,7 +86,7 @@ def test_recipient_name_is_drawn(student, batch):
 
 def test_programme_replaces_the_bracketed_placeholder(student, batch):
     text = _flowed(build_certificate_pdf(student, batch))
-    assert "to the Full Stack Java Internship conducted by Dvein Innovations." in text
+    assert "to the Full Stack Java Internship conducted by DVein Innovations." in text
     # The template's own placeholder must never survive onto an issued certificate.
     assert "Workshop /" not in text
     assert "Training Program]" not in text
@@ -114,7 +114,7 @@ def test_programme_label_falls_back_rather_than_inventing(student):
 def test_the_fixed_wording_is_preserved(student, batch):
     text = _flowed(build_certificate_pdf(student, batch))
     assert "This certificate is proudly presented to" in text
-    assert "conducted by Dvein Innovations." in text
+    assert "conducted by DVein Innovations." in text
     assert "wish them continued success in their future endeavors." in text
 
 
@@ -134,7 +134,7 @@ def test_body_never_grows_into_the_signature_block(student, batch):
     student.domain = "Artificial Intelligence and Machine Learning Engineering Specialisation"
     pdf = build_certificate_pdf(student, batch)
     assert pdf[:5] == b"%PDF-"
-    assert "conducted by Dvein Innovations." in _flowed(pdf)
+    assert "conducted by DVein Innovations." in _flowed(pdf)
 
 
 def test_a_long_name_stays_inside_the_rule(student, batch):

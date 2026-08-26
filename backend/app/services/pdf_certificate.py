@@ -1,6 +1,6 @@
 """Certificate of Appreciation — the institute's own design, filled in.
 
-`assets/certificate_bg.jpg` is Dvein's supplied certificate with only the body
+`assets/certificate_bg.jpg` is DVein's supplied certificate with only the body
 paragraph stripped out; the border, logo, watermark, seal, signature, title and
 the gold name rule are all part of the artwork and are never redrawn. This
 module composes the one paragraph back on top, with the student's real name and
@@ -200,7 +200,7 @@ def build_certificate_pdf(student: Student, batch=None) -> bytes:
     before = _latin1(
         "recognition of their valuable participation, dedication, and contribution to the"
     )
-    after = _latin1(f"conducted by Dvein Innovations. {CLOSING}")
+    after = _latin1(f"conducted by DVein Innovations. {CLOSING}")
 
     # Each word carries the weight it should be drawn in, so the programme
     # stays bold wherever the wrap happens to put it — the template sets it in

@@ -8,6 +8,7 @@ the only role that can move a student from one HR to another.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import io
 from datetime import date
@@ -213,6 +214,24 @@ def update_student(
     # taken by a colleague's student is just as taken.
     new_batch_id = changes.get("batch_id")
     if new_batch_id and new_batch_id != s.batch_id:
+        # A student belongs to one cohort and stays there. Attendance, the
+        # roster and the completion date are all kept per batch, so moving
+        # someone mid-programme would leave their attendance behind in a
+        # batch they are no longer in and give them a start date they never
+        # had. An admin can still move them — a genuine mistake needs a way
+        # back — but an HR cannot quietly re-seat a colleague's student, or
+        # their own.
+        if s.batch_id and user.role is not UserRole.admin:
+            current = batches.get(s.batch_id)
+            where = f" ({current.code})" if current else ""
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail=(
+                    f"{s.name} is already in a batch{where}. A student stays in one "
+                    "batch; ask an administrator if they need to be moved."
+                ),
+            )
+
         batch = batches.get(new_batch_id)
         if batch is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="That batch does not exist.")
@@ -281,6 +300,57 @@ def update_student(
 
     updated = students.update(student_id, changes)
     return StudentOut.model_validate(updated)
+
+
+@router.delete("/{student_id}", status_code=status.HTTP_200_OK)
+def delete_student(
+    student_id: str,
+    students: StudentRepo,
+    reports: ReportRepo,
+    storage: Storage,
+    activity_repo: ActivityRepo,
+    user: AdminUser,
+) -> dict:
+    """Delete a student and everything filed against them. Admin only.
+
+    Deliberately not available to an HR, even for their own student. Deleting
+    removes money from the ledger, and an HR's revenue is what the admin
+    reviews them on — nobody should be able to quietly revise their own
+    figures. An HR who has enrolled someone in error asks the admin.
+
+    This is destructive and there is no undo: payments disappear from the
+    ledger, attendance from the grid, and the student's offer letter and
+    certificate from Documents along with the stored PDFs. The console asks
+    for confirmation and names what will go.
+    """
+    student = _get_or_404(students, student_id)
+
+    # Stored objects have to go before the records that name them, or the
+    # filenames are lost and the files linger in the bucket forever.
+    for report in reports.list_all(student_id=student_id):
+        if report.stored_filename:
+            # A missing object must not block the delete: the record is the
+            # thing that matters, and a bucket that has already lost the file
+            # is not a reason to leave the student half-removed.
+            with contextlib.suppress(Exception):
+                storage.delete(report.stored_filename)
+
+    removed = students.purge(student_id)
+
+    activity.record(
+        activity_repo,
+        action="student.deleted",
+        actor_id=user.id,
+        entity_type="student",
+        entity_id=student_id,
+        summary=(
+            f"Deleted {student.name} with {removed['payments']} payment(s), "
+            f"{removed['attendance']} attendance record(s) and "
+            f"{removed['reports']} document(s)"
+        ),
+        meta=removed,
+    )
+    return {"deleted": student.name, **removed}
 
 
 @router.post("/{student_id}/reassign", response_model=StudentReassignResult)

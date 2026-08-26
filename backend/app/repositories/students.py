@@ -124,6 +124,48 @@ class StudentRepository:
         ref.set(data)
         return Student.from_doc(ref.id, data)
 
+    def purge(self, student_id: str) -> dict[str, int]:
+        """Delete a student and everything filed against them.
+
+        Payments, attendance and issued documents all carry the student's id
+        and nothing else — leaving them behind would leave revenue totals
+        counting a student who no longer exists, and an attendance grid with
+        rows that resolve to nothing.
+
+        Returns what it removed, so the caller can report it and the audit
+        trail records the real extent of the deletion rather than "deleted".
+
+        Storage objects for the documents are the caller's to remove: this
+        repository does not reach outside Firestore.
+        """
+        from app.repositories.attendance import ATTENDANCE
+        from app.repositories.payments import PAYMENT_TRANSACTIONS
+        from app.repositories.reports import REPORTS
+
+        removed = {"payments": 0, "attendance": 0, "reports": 0}
+        for collection, key in (
+            (PAYMENT_TRANSACTIONS, "payments"),
+            (ATTENDANCE, "attendance"),
+            (REPORTS, "reports"),
+        ):
+            while True:
+                docs = list(
+                    self._db.collection(collection)
+                    .where(filter=FieldFilter("student_id", "==", student_id))
+                    .limit(400)
+                    .stream()
+                )
+                if not docs:
+                    break
+                batch = self._db.batch()
+                for d in docs:
+                    batch.delete(d.reference)
+                batch.commit()
+                removed[key] += len(docs)
+
+        self._db.collection(STUDENTS).document(student_id).delete()
+        return removed
+
     def create_manual(
         self,
         *,

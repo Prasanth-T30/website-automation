@@ -121,7 +121,7 @@
 }
 
 /* The soft radial glow behind the public form and the app shell's content
-   area — matches Dvein's actual site rather than a flat background. */
+   area — matches DVein's actual site rather than a flat background. */
 @utility shell-wash {
   background: var(--shell-wash);
 }

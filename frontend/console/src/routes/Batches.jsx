@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Banknote, Layers, Plus, UserMinus, UserPlus, Users } from "lucide-react";
+import { Award, Banknote, Layers, Plus, UserMinus, UserPlus, Users } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -19,6 +19,7 @@ import { batchesApi } from "@/features/batches/api";
 import { publicApi } from "@/features/public/api";
 import { studentsApi } from "@/features/students/api";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { CertificateDialog } from "@/features/students/IssueDocumentDialog";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { money, shortDate } from "@/lib/format";
@@ -289,6 +290,9 @@ function BatchRoster({ batch }) {
       toast.error(err instanceof ApiError ? err.detail : "Could not remove that student."),
   });
 
+  /* Which student's certificate is open, if any. */
+  const [certificateFor, setCertificateFor] = useState(null);
+
   const assignable = (allStudents.data ?? []).filter((s) => !s.batch_id);
   const full = batch.capacity > 0 && batch.student_count >= batch.capacity;
   const balanceOf = (s) => Math.max(0, s.total_fees - s.fees_paid);
@@ -442,6 +446,21 @@ function BatchRoster({ batch }) {
                     {s.payment_status}
                   </Badge>
                 )}
+                {/* Certificates are issued from here because this is where an
+                    HR looks when a cohort is finishing: the roster already
+                    says who has settled and who still owes, and chasing a
+                    balance and issuing the certificate are the same errand.
+                    Only for students the caller owns — the dialog mails them. */}
+                {s.email && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setCertificateFor(s)}
+                    title={`Generate a certificate for ${s.name}`}
+                  >
+                    <Award className="size-3.5" aria-hidden /> Generate
+                  </Button>
+                )}
                 {(batch.can_edit || s.is_mine) && (
                   <button
                     type="button"
@@ -505,6 +524,15 @@ function BatchRoster({ batch }) {
             ))}
           </div>
         </Dialog>
+      )}
+
+      {certificateFor && (
+        <CertificateDialog
+          studentId={certificateFor.id}
+          name={certificateFor.name}
+          email={certificateFor.email}
+          onClose={() => setCertificateFor(null)}
+        />
       )}
     </div>
   );

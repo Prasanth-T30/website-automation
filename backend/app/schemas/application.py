@@ -1,6 +1,6 @@
 """Pydantic models for the public registration form and its review workflow.
 
-Validation rules mirror Dvein's live registration form exactly (field
+Validation rules mirror DVein's live registration form exactly (field
 lengths, choice lists, the "declaration must be checked" rule) — this is the
 institute's actual intake form, not an invented one.
 """

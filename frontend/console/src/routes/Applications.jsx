@@ -390,7 +390,7 @@ function ApproveDialog({ application, onClose, onSubmit, loading }) {
   } = useForm({
     resolver: zodResolver(approveSchema),
     defaultValues: {
-      subject: `${application.category} Offer Letter — Dvein Innovations`,
+      subject: `${application.category} Offer Letter — DVein Innovations`,
       body: "",
       total_fees: paid,
     },

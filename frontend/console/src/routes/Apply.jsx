@@ -150,7 +150,7 @@ export default function Apply() {
     <div className="shell-wash min-h-dvh px-4 py-10 sm:px-6">
       <div className="mx-auto max-w-2xl">
         <div className="mb-6 flex items-center gap-3">
-          <img src="/brand/logo.png" alt="Dvein Innovations" className="h-9" />
+          <img src="/brand/logo.png" alt="DVein Innovations" className="h-9" />
         </div>
 
         <Card>

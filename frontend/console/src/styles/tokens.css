@@ -1,7 +1,7 @@
 /* ============================================================================
-   Dvein Console — design tokens
+   DVein Console — design tokens
    ----------------------------------------------------------------------------
-   Palette follows the "Dvein HRM Console" design: a warm paper canvas under an
+   Palette follows the "DVein HRM Console" design: a warm paper canvas under an
    aubergine-and-violet console, with gold as the single accent metal.
 
      brand   (#5B4BA8)  primary actions, active navigation, links
@@ -216,7 +216,7 @@
   --shell-wash: radial-gradient(900px 420px at 50% -180px, #1a1330 0%, #0d0a16 62%);
 }
 
-/* Dvein's admin chrome (top console header + tab bar) is the darkest step of
+/* DVein's admin chrome (top console header + tab bar) is the darkest step of
    the brand ramp rather than a neutral — it reads as the same material as the
    login hero. Unlike the old fixed navy, it re-grades with the theme so a dark
    console doesn't leave a lighter bar floating above it. */

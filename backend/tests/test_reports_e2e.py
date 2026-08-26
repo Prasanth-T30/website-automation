@@ -309,7 +309,7 @@ def test_registration_details_reach_the_certificate(client: TestClient, user_rep
     text = _pdf_flowed(pdf)
     # Name and programme both trace back to the registration form.
     assert name in text
-    assert "to the Full Stack Java Internship conducted by Dvein Innovations." in text
+    assert "to the Full Stack Java Internship conducted by DVein Innovations." in text
     assert issued.json()["certificate_number"] in text
 
 

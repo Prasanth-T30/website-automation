@@ -231,6 +231,7 @@ def batch_roster(
                 status=s.status,
                 is_mine=s.owner_id == user.id,
                 owner_name=names.get(s.owner_id or "") if is_admin else None,
+                email=s.email if mine else None,
                 total_fees=s.total_fees if mine else None,
                 fees_paid=s.fees_paid if mine else None,
                 balance=max(0.0, s.total_fees - s.fees_paid) if mine else None,

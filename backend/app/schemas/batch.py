@@ -74,6 +74,11 @@ class BatchRosterEntry(BaseModel):
     status: str
     is_mine: bool
     owner_name: str | None = None
+    # Scoped like the fees below: an address is contact detail, and a
+    # colleague's student is not the caller's to contact. Present so a
+    # certificate can be issued from the roster without a second round trip
+    # to fetch the one field the dialog needs.
+    email: str | None = None
 
     total_fees: float | None = None
     fees_paid: float | None = None

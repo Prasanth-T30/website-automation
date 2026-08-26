@@ -25,7 +25,9 @@ from app.models.student import Student
 from app.schemas.notification import NotificationOut
 
 BATCH_DANGER_DAYS = 3
-BATCH_WARNING_DAYS = 20
+# How far ahead a finishing batch is announced. Ten days is enough notice
+# to chase the last fees and prepare certificates before the cohort ends.
+BATCH_WARNING_DAYS = 10
 NEW_STUDENT_WINDOW_DAYS = 3
 # How far ahead a not-yet-started batch is worth flagging. Wider than the
 # expiry window: a cohort that starts in three weeks still needs a roster
@@ -86,6 +88,7 @@ def build_notifications(
                 ),
                 description=f"{roster_count} students · {b.domain} · Ends {b.end_date}",
                 urgency=0 if danger else 2,
+                link=f"/batches?batch={b.id}",
             )
         )
 
@@ -117,6 +120,7 @@ def build_notifications(
                 # Between overdue payments (1) and expiry warnings (2) when
                 # imminent; otherwise below them, above the new-student feed.
                 urgency=2 if soon else 3,
+                link=f"/batches?batch={b.id}",
             )
         )
 
@@ -143,6 +147,7 @@ def build_notifications(
                 title=f"Payment overdue: {s.name}",
                 description=f"Balance: Rs. {balance:,.0f} - {batch_code}",
                 urgency=1,
+                link=f"/payments?student={s.id}",
                 created_at=s.updated_at,
             )
         )
@@ -157,6 +162,9 @@ def build_notifications(
                 title=f"{len(pending)} student{plural} with pending payments",
                 description=f"Total pending: Rs. {total_pending:,.0f}",
                 urgency=3,
+                # The whole ledger, not one student: this summarises several,
+                # and there is no single record to open.
+                link="/payments",
             )
         )
 
@@ -170,6 +178,7 @@ def build_notifications(
                     title=f"New student registered: {s.name}",
                     description=f"Enrolled in {s.domain}",
                     urgency=4,
+                    link=f"/students?student={s.id}",
                     created_at=s.created_at,
                 )
             )

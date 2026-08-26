@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Bell, Info, Megaphone, Trash2, TriangleAlert } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useState } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
@@ -90,10 +91,18 @@ export default function Notifications() {
               const announced = isAnnouncement(n.id);
               const meta = META[n.type] ?? META.primary;
               const Icon = announced ? Megaphone : meta.icon;
+              /* An alert that names a batch or a student is only useful if it
+                 opens it. Announcements are prose with nothing behind them, so
+                 they stay inert rather than pretending to be clickable. */
+              const Row = n.link ? Link : "div";
+              const rowProps = n.link ? { to: n.link } : {};
               return (
-                <div
+                <Row
                   key={n.id}
-                  className={`flex gap-3 p-4 ${announced ? "bg-brand-subtle/25" : ""}`}
+                  {...rowProps}
+                  className={`flex gap-3 p-4 ${announced ? "bg-brand-subtle/25" : ""} ${
+                    n.link ? "cursor-pointer transition-colors hover:bg-subtle" : ""
+                  }`}
                 >
                   <div
                     className={`flex size-9 shrink-0 items-center justify-center rounded-full ${meta.tone}`}
@@ -129,7 +138,7 @@ export default function Notifications() {
                       <Trash2 className="size-4" aria-hidden />
                     </button>
                   )}
-                </div>
+                </Row>
               );
             })}
           </Card>

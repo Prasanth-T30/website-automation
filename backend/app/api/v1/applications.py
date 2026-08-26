@@ -183,7 +183,7 @@ def reject_application(
 
     send_email(
         to_email=app_.email,
-        subject=f"{app_.category} Registration Update — Dvein Innovations",
+        subject=f"{app_.category} Registration Update — DVein Innovations",
         body_html=render_rejection_body(app_, data.reason),
     )
 

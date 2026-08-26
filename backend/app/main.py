@@ -29,7 +29,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="Multi-user HRM for Dvein Innovations.",
+        description="Multi-user HRM for DVein Innovations.",
         default_response_class=ORJSONResponse,
         # API docs are useful in development but should not be public in production.
         docs_url=None if settings.is_production else "/docs",

@@ -1,6 +1,6 @@
 """Choice lists shared by the registration form and its validation.
 
-Verbatim from Dvein's live programme catalogue — these are the institute's
+Verbatim from DVein's live programme catalogue — these are the institute's
 actual programme categories and domains, not an invented list.
 """
 

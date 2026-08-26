@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     )
 
     # ── Application ───────────────────────────────────────────────────────
-    app_name: str = "Dvein HRM API"
+    app_name: str = "DVein HRM API"
     app_version: str = "1.0.0"
     app_env: Literal["development", "staging", "production"] = "development"
     api_host: str = "0.0.0.0"
@@ -143,7 +143,7 @@ class Settings(BaseSettings):
     smtp_username: str | None = None
     smtp_password: str | None = None
     smtp_from_email: str = "info@dveininnovation.com"
-    smtp_from_name: str = "Dvein Innovations"
+    smtp_from_name: str = "DVein Innovations"
     # Where replies should land. Defaults to the sending mailbox, but the
     # letterhead prints a different address, so this lets the two be aligned
     # without changing which account does the sending.

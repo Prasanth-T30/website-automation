@@ -357,9 +357,13 @@ function NotificationsMenu() {
             <p className="p-4 text-center text-xs text-fg-muted">You're all caught up.</p>
           ) : (
             alerts.slice(0, 4).map((n) => (
-              <div
+              /* Same rule as the Alerts page: an alert that names something
+                 opens it, and one that names nothing stays inert. */
+              <NavLink
                 key={n.id}
-                className="flex gap-2.5 border-b border-line-subtle px-4 py-3 last:border-0"
+                to={n.link ?? "/notifications"}
+                onClick={() => setOpen(false)}
+                className="flex gap-2.5 border-b border-line-subtle px-4 py-3 transition-colors last:border-0 hover:bg-subtle"
               >
                 <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", dotColor[n.type])} />
                 <span className="min-w-0">
@@ -368,7 +372,7 @@ function NotificationsMenu() {
                   </span>
                   <span className="mt-0.5 block text-[11.5px] text-fg-muted">{n.description}</span>
                 </span>
-              </div>
+              </NavLink>
             ))
           )}
         </div>
@@ -441,13 +445,13 @@ export default function AppShell() {
   const subTabs = activeGroup.items.length > 1 ? activeGroup.items : [];
   return (
     <div className="shell-wash min-h-dvh bg-canvas">
-      {/* Dvein's admin chrome is the darkest step of the brand ramp — the
+      {/* DVein's admin chrome is the darkest step of the brand ramp — the
             company's product identity, re-graded with the theme so a dark
             console doesn't leave a lighter bar floating above it. */}
       <header className="sticky top-0 z-30 bg-gradient-to-b from-chrome to-chrome-2 shadow-[0_1px_0_rgba(0,0,0,0.2)]">
         <div className="mx-auto flex h-[62px] max-w-[1560px] items-center gap-5 px-6">
           <div className="flex shrink-0 items-center gap-2.5">
-            <img src="/brand/logo-icon.png" alt="Dvein Innovations" className="size-8" />
+            <img src="/brand/logo-icon.png" alt="DVein Innovations" className="size-8" />
             <div className="leading-tight">
               <p className="text-[13.5px] font-extrabold tracking-widest text-white">DVEIN</p>
               <p className="text-[8.5px] font-semibold tracking-[0.24em] text-chrome-text">

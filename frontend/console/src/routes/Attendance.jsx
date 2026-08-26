@@ -32,9 +32,13 @@ const DATES = Array.from({ length: 7 }, (_, i) => isoDate(subDays(new Date(), 6 
 export default function Attendance() {
   const queryClient = useQueryClient();
   const [batchId, setBatchId] = useState(null);
+  /* Every batch, not just the active ones. Filtering to "active" meant an
+     institute whose cohorts were all upcoming or completed saw no batch
+     selector at all — the screen looked broken rather than empty, and there
+     was no way to correct attendance for a batch that had just finished. */
   const batches = useQuery({
-    queryKey: ["batches", { status: "active" }],
-    queryFn: () => batchesApi.list({ status: "active" }),
+    queryKey: ["batches"],
+    queryFn: () => batchesApi.list(),
   });
   const activeBatchId = batchId ?? batches.data?.[0]?.id ?? null;
   const roster = useQuery({
@@ -110,8 +114,8 @@ export default function Attendance() {
           <Card>
             <EmptyState
               icon={<CalendarCheck className="size-6" />}
-              title="No active batches"
-              description="Attendance can only be marked for active batches."
+              title="No batches yet"
+              description="Create a batch and assign students to it before marking attendance."
             />
           </Card>
         </div>
@@ -119,19 +123,39 @@ export default function Attendance() {
 
       {batches.data && batches.data.length > 0 && (
         <>
-          <div className="flex gap-1 overflow-x-auto px-6 pt-4">
+          <div className="flex flex-wrap items-center gap-2 px-6 pt-4">
+            <span className="text-xs font-bold tracking-wide text-fg-muted uppercase">
+              Batch
+            </span>
             {batches.data.map((b) => (
               <button
                 key={b.id}
                 onClick={() => setBatchId(b.id)}
+                title={`${b.domain} · ${b.start_date} to ${b.end_date}`}
                 className={cn(
-                  "rounded-md px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition-colors",
+                  "flex items-center gap-1.75 rounded-md px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition-colors",
                   activeBatchId === b.id
                     ? "bg-brand text-on-brand"
                     : "text-fg-secondary hover:bg-subtle",
                 )}
               >
                 {b.code}
+                {/* Which cohort is running matters when the list is no longer
+                    filtered to active ones. */}
+                <span
+                  className={cn(
+                    "rounded px-1.25 py-px text-[9.5px] font-bold tracking-wide uppercase",
+                    activeBatchId === b.id
+                      ? "bg-white/24 text-on-brand"
+                      : b.status === "active"
+                        ? "bg-success-subtle text-success-text"
+                        : b.status === "upcoming"
+                          ? "bg-warn-subtle text-warn-text"
+                          : "bg-inset text-fg-muted",
+                  )}
+                >
+                  {b.status}
+                </span>
               </button>
             ))}
           </div>

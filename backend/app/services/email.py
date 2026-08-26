@@ -117,7 +117,7 @@ def _sentence_end(text: str) -> str:
 
 
 def _signature() -> str:
-    """The sign-off Dvein uses on both the offer letter and the certificate."""
+    """The sign-off DVein uses on both the offer letter and the certificate."""
     return (
         f"<p>Warm regards,<br>"
         f"<strong>{SIGNATORY_NAME}</strong>,<br>"
@@ -188,7 +188,7 @@ def render_completion_body(
     *,
     name: str | None = None,
 ) -> str:
-    """Body for the certificate email — Dvein's own wording.
+    """Body for the certificate email — DVein's own wording.
 
     The greeting is the only part that varies. The rest is the institute's
     supplied copy verbatim, so what a student receives does not drift with
@@ -251,7 +251,7 @@ def render_offer_body(
     duration_text: str | None = None,
     custom_body: str | None = None,
 ) -> str:
-    """Body for the offer letter email — Dvein's own wording.
+    """Body for the offer letter email — DVein's own wording.
 
     `duration_text` reads back the programme the student actually chose. The
     supplied copy says "One-Month Internship Programme", but duration is a

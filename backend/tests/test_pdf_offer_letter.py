@@ -1,6 +1,6 @@
 """Offer-letter PDF generation — no emulator needed, pure function.
 
-The renderer now composes onto Dvein's real letterhead artwork and takes its
+The renderer now composes onto DVein's real letterhead artwork and takes its
 fields explicitly, because the caller has to draw the salutation and the
 programme dates from the originating application — a student record carries
 neither.

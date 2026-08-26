@@ -1,6 +1,6 @@
 """A public registration — a Firestore document shape, not an ORM row.
 
-Field names match Dvein's live registration form exactly (see
+Field names match DVein's live registration form exactly (see
 app/core/constants.py). `status`/`owner_id`/`claimed_at` are the ownership
 layer the reference site doesn't have: it's single-admin, with no concept of
 one of several staff members claiming a lead.

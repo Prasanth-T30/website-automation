@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Award, Download, GraduationCap, Plus, Search, Send } from "lucide-react";
+import { Award, Download, GraduationCap, Plus, Search, Send, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -266,6 +266,7 @@ export default function Students() {
             canRecordPayment={isAdmin || selected.owner_id === user?.id}
             staff={isAdmin ? (allUsers.data ?? []) : null}
             onUpdated={(s) => setSelected(s)}
+            onClose={() => setSelected(null)}
           />
         )}
       </SlideOver>
@@ -410,7 +411,15 @@ function AddStudentDialog({ open, onOpenChange, batches }) {
   );
 }
 
-function StudentDetail({ student, batches, ownerName, canRecordPayment, staff, onUpdated }) {
+function StudentDetail({
+  student,
+  batches,
+  ownerName,
+  canRecordPayment,
+  staff,
+  onUpdated,
+  onClose,
+}) {
   const queryClient = useQueryClient();
   const balance = student.total_fees - student.fees_paid;
   const payments = useQuery({
@@ -455,6 +464,29 @@ function StudentDetail({ student, batches, ownerName, canRecordPayment, staff, o
     },
     onError: (err) =>
       toast.error(err instanceof ApiError ? err.detail : "Could not reassign the student."),
+  });
+
+  /* Admin only, and destructive: it takes the student's payments out of the
+     ledger along with them. Confirmed by typing the name, because a stray
+     click here rewrites an HR's revenue. */
+  const [confirmDelete, setConfirmDelete] = useState("");
+  const remove = useMutation({
+    mutationFn: () => studentsApi.remove(student.id),
+    onSuccess: async (result) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: STUDENTS_KEY }),
+        queryClient.invalidateQueries({ queryKey: ["payments"] }),
+        queryClient.invalidateQueries({ queryKey: ["reports"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "hr-performance"] }),
+      ]);
+      onClose();
+      toast.success(
+        `${result.deleted} deleted with ${result.payments} payment(s), ` +
+          `${result.attendance} attendance record(s) and ${result.reports} document(s).`,
+      );
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.detail : "Could not delete the student."),
   });
 
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -571,6 +603,38 @@ function StudentDetail({ student, batches, ownerName, canRecordPayment, staff, o
                   </option>
                 ))}
             </select>
+          </CardBody>
+        </Card>
+      )}
+
+      {/* Admin only, and last on the panel because it is the one action with
+          no way back. */}
+      {staff && (
+        <Card className="border-danger/30">
+          <CardHeader
+            title="Delete this student"
+            description="Removes the student, their payments, attendance and issued documents. Their revenue leaves the owning HR's figures. This cannot be undone."
+          />
+          <CardBody className="!p-4">
+            <Field
+              label={`Type "${student.name}" to confirm`}
+              hint="Deleting is deliberate, so it asks for the name rather than a yes."
+            >
+              <Input
+                value={confirmDelete}
+                onChange={(e) => setConfirmDelete(e.target.value)}
+                placeholder={student.name}
+              />
+            </Field>
+            <Button
+              variant="danger"
+              className="mt-3 w-full"
+              loading={remove.isPending}
+              disabled={confirmDelete.trim() !== student.name}
+              onClick={() => remove.mutate()}
+            >
+              <Trash2 className="size-4" aria-hidden /> Delete permanently
+            </Button>
           </CardBody>
         </Card>
       )}

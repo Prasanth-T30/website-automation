@@ -105,17 +105,33 @@ def test_batch_expiring_in_two_days_is_a_danger_notification(client: TestClient,
     assert match["urgency"] == 0
 
 
-def test_batch_expiring_in_fifteen_days_is_a_warning_notification(client: TestClient, user_repo):
+def test_a_batch_ending_within_ten_days_is_announced(client: TestClient, user_repo):
+    """Ten days is the notice period: long enough to chase the last fees and
+    prepare certificates before the cohort ends."""
     csrf, _ = _login_as(client, user_repo, role=UserRole.admin)
     batch = _create_batch(
         client, csrf,
         start_date=(date.today() - timedelta(days=10)).isoformat(),
-        end_date=(date.today() + timedelta(days=15)).isoformat(),
+        end_date=(date.today() + timedelta(days=9)).isoformat(),
     )
 
     res = client.get("/api/v1/notifications", headers={"X-CSRF-Token": csrf})
     match = next(n for n in res.json() if n["id"] == f"batch-expiry-{batch['id']}")
     assert match["type"] == "warning"
+    # An alert that names a batch has to be able to open it.
+    assert match["link"] == f"/batches?batch={batch['id']}"
+
+
+def test_a_batch_ending_just_outside_the_window_is_not(client: TestClient, user_repo):
+    csrf, _ = _login_as(client, user_repo, role=UserRole.admin)
+    batch = _create_batch(
+        client, csrf,
+        start_date=(date.today() - timedelta(days=10)).isoformat(),
+        end_date=(date.today() + timedelta(days=11)).isoformat(),
+    )
+
+    res = client.get("/api/v1/notifications", headers={"X-CSRF-Token": csrf})
+    assert not [n for n in res.json() if n["id"] == f"batch-expiry-{batch['id']}"]
 
 
 def test_batch_expiring_beyond_the_warning_window_has_no_notification(

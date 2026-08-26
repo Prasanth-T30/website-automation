@@ -1,4 +1,4 @@
-"""Offer letter — Dvein's own letterhead, filled in.
+"""Offer letter — DVein's own letterhead, filled in.
 
 `assets/offer_letter_bg.jpg` is the supplied letter with every line of body
 text stripped out; the logo, the header band, the footer address strip and
@@ -151,6 +151,23 @@ def _wrap(pdf: FPDF, text: str, first_x: float) -> list[tuple[float, str]]:
     return lines
 
 
+def _sentence_end(text: str) -> str:
+    """Close a sentence without doubling a full stop.
+
+    The company name ends in "Ltd.", so appending a period gives "Ltd..".
+    The email templates have solved this since they were written; the letter
+    had not, and printed the doubled stop on every offer letter sent.
+    """
+    return text if text.endswith(".") else f"{text}."
+
+
+# The addressee block: where it starts, and the step between its lines.
+# 24pt matches the leading the letterhead's own sender block uses, so the two
+# read as the same document rather than two settings on one page.
+ADDRESSEE_TOP = 488.7
+ADDRESSEE_LEADING = 24.0
+
+
 def build_offer_letter_pdf(
     *,
     name: str,
@@ -194,13 +211,24 @@ def build_offer_letter_pdf(
     # ── Date and addressee ───────────────────────────────────────────────
     line(376.0, f"Date: {_fmt_date(issued_on or date.today())}", x=108.1)
 
+    # The addressee block, set on one rhythm.
+    #
+    # These were five fixed coordinates whose gaps grew as they went — 24.0,
+    # then 34.5, then 52.1 — so the block sagged open down the page. Worse,
+    # college and place are both optional, and a missing one left its gap
+    # behind as a hole. Laid out in sequence instead: every line follows the
+    # last by the same step, and a line that is not printed takes no space.
     addressed = f"{salutation} {name}".strip() if salutation else name
-    line(488.7, "To,")
-    line(512.7, f"{addressed},")
+    block = ["To,", f"{addressed},"]
     if college:
-        line(547.2, f"{college},")
+        block.append(f"{college},")
     if place:
-        line(599.3, f"{place}.")
+        block.append(f"{place}.")
+
+    y = ADDRESSEE_TOP
+    for entry in block:
+        line(y, entry)
+        y += ADDRESSEE_LEADING
 
     pdf.set_font("Times", "B", BODY_SIZE)
     pdf.text(LEFT, 651.2 + BASELINE, _latin1("Subject:"))
@@ -222,8 +250,11 @@ def build_offer_letter_pdf(
         (
             771.2,
             f"We are pleased to offer you the opportunity to undergo a {programme} "
-            f"Programme on {domain or 'your chosen domain'} at {COMPANY_NAME}"
-            f"{window}.",
+            f"Programme on {domain or 'your chosen domain'} at "
+            # The company name ends in "Ltd.", so closing the sentence after it
+            # would print "Ltd..". With dates the sentence ends on the window
+            # instead, and the name sits mid-sentence where it needs no stop.
+            + (f"{COMPANY_NAME}{window}." if window else _sentence_end(COMPANY_NAME)),
         ),
         (
             847.6,
