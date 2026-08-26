@@ -15,3 +15,11 @@ export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || (apiOrigin ? `${apiOrigin}/api/v1` : "/api/v1");
 export const APP_NAME = "Internship Registration Portal";
 export const COMPANY_NAME = "DVein Innovations Pvt. Ltd.";
+
+// The year in the footer's copyright line.
+//
+// Fixed rather than `new Date().getFullYear()`: that printed whatever year the
+// visitor's clock said, so the notice moved on its own and could disagree with
+// the same notice elsewhere. Copyright dates from when the work was published,
+// not from today, so it is stated once here and changed on purpose.
+export const COPYRIGHT_YEAR = 2025;
