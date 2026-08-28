@@ -470,6 +470,14 @@ function StudentDetail({
      ledger along with them. Confirmed by typing the name, because a stray
      click here rewrites an HR's revenue. */
   const [confirmDelete, setConfirmDelete] = useState("");
+  /* Names arrive from a public form, so they carry whatever whitespace and
+     casing the applicant typed — "test -2 " with a trailing space is a real
+     record. Comparing a trimmed input against the raw name left such a
+     student permanently undeletable, since no amount of typing could match a
+     space the field strips. Both sides are normalised, and the prompt shows
+     the same form it expects. */
+  const confirmName = (student.name ?? "").trim();
+  const confirmed = confirmDelete.trim().toLowerCase() === confirmName.toLowerCase();
   const remove = useMutation({
     mutationFn: () => studentsApi.remove(student.id),
     onSuccess: async (result) => {
@@ -617,20 +625,20 @@ function StudentDetail({
           />
           <CardBody className="!p-4">
             <Field
-              label={`Type "${student.name}" to confirm`}
+              label={`Type "${confirmName}" to confirm`}
               hint="Deleting is deliberate, so it asks for the name rather than a yes."
             >
               <Input
                 value={confirmDelete}
                 onChange={(e) => setConfirmDelete(e.target.value)}
-                placeholder={student.name}
+                placeholder={confirmName}
               />
             </Field>
             <Button
               variant="danger"
               className="mt-3 w-full"
               loading={remove.isPending}
-              disabled={confirmDelete.trim() !== student.name}
+              disabled={!confirmed}
               onClick={() => remove.mutate()}
             >
               <Trash2 className="size-4" aria-hidden /> Delete permanently
