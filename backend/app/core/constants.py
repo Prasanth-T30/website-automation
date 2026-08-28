@@ -184,6 +184,27 @@ DURATION_CHOICES = ["15 Days", "30 Days", "45 Days", "60 Days", "90 Days"]
 # which the public form fills in as "Online" behind the scenes.
 MODE_CHOICES = ["Online", "Offline"]
 
+# How a registration was paid for. UPI is settled by the applicant before they
+# submit, so it arrives with an amount and a reference; cash is settled at the
+# desk, so the amount is entered by an HR afterwards and there is no reference.
+PAYMENT_METHOD_UPI = "upi"
+PAYMENT_METHOD_CASH = "cash"
+PAYMENT_METHODS = [PAYMENT_METHOD_UPI, PAYMENT_METHOD_CASH]
+
+# Revenue the institute earns off-campus, at a college rather than from an
+# individual registration. These never pass through applications, students or
+# the fee ledger, so each one is entered by hand by the HR who ran it and
+# counts toward that HR's own total. Stored as the key; the label is what the
+# console shows.
+EVENT_TYPE_LABELS: dict[str, str] = {
+    "workshop": "Workshop",
+    "bootcamp": "Bootcamp",
+    "training_program": "Training Program",
+    "addon_course": "Add-on Course",
+    "industrial_visit": "Industrial Visit",
+}
+EVENT_TYPES = list(EVENT_TYPE_LABELS)
+
 YEAR_CHOICES = ["1st Year", "2nd Year", "3rd Year", "4th Year", "Final Year"]
 
 

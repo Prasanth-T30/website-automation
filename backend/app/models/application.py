@@ -33,8 +33,12 @@ class Application:
     start_date: str  # ISO date — stored as a string, never a real date object
     end_date: str
 
-    amount: float
-    transaction_id: str
+    # A cash registration is settled at the desk after the form is submitted,
+    # so it arrives with no amount, no reference and no screenshot; an HR
+    # enters the amount later. Only a UPI payment carries all three.
+    payment_method: str
+    amount: float | None
+    transaction_id: str | None
     payment_screenshot: str | None  # Firebase Storage path
 
     declaration: bool
@@ -47,6 +51,8 @@ class Application:
     project_topic: str | None = None
     # Free text the applicant typed under "Other" on the public form —
     # anything they wanted the team to know that the form doesn't ask for.
+    # The HR the applicant says referred them, as typed on the public form.
+    hr_name: str | None = None
     other: str | None = None
     # Hometown, and the year they finish (or finished) their course. Both
     # optional for the same reason as the rest of this block: applications
@@ -91,12 +97,14 @@ class Application:
             duration=data["duration"],
             start_date=data["start_date"],
             end_date=data["end_date"],
-            amount=data["amount"],
-            transaction_id=data["transaction_id"],
+            payment_method=data.get("payment_method", "upi"),
+            amount=data.get("amount"),
+            transaction_id=data.get("transaction_id"),
             payment_screenshot=data.get("payment_screenshot"),
             declaration=data.get("declaration", False),
             mode=data.get("mode"),
             project_topic=data.get("project_topic"),
+            hr_name=data.get("hr_name"),
             other=data.get("other"),
             native_place=data.get("native_place"),
             passed_out_year=data.get("passed_out_year"),

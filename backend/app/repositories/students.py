@@ -97,11 +97,14 @@ class StudentRepository:
         """
         ref = self._db.collection(STUDENTS).document()
         now = datetime.now(UTC)
+        # A cash registration is settled at the desk after the form is
+        # submitted, so it carries no amount at all — nothing has been paid
+        # yet, and the HR records the collection separately.
+        paid = application.amount or 0
         # Never bill less than what they have already paid — that would show a
         # negative balance and let the capping rule credit them on the next
         # installment.
-        billed = max(total_fees if total_fees is not None else application.amount,
-                     application.amount)
+        billed = max(total_fees if total_fees is not None else paid, paid)
         data = {
             "application_id": application.id,
             "owner_id": application.owner_id,
@@ -115,8 +118,10 @@ class StudentRepository:
             "duration": application.duration,
             "batch_id": None,
             "total_fees": billed,
-            "fees_paid": application.amount,
-            "payment_status": "paid" if application.amount >= billed else "partial",
+            "fees_paid": paid,
+            # A zero-fee record is settled by definition; without this a cash
+            # registration with no fee stated yet would read as "partial".
+            "payment_status": "paid" if paid >= billed else "partial",
             "status": "active",
             "created_at": now,
             "updated_at": now,

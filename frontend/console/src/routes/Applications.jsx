@@ -243,17 +243,31 @@ export default function Applications() {
                           {a.project_topic && (
                             <p className="mt-1 text-xs text-fg-muted">Topic: {a.project_topic}</p>
                           )}
-                          {/* Whatever the applicant typed under "Other". Shown
-                              in full rather than truncated — it is the one place
-                              they can say something the form didn't ask for. */}
-                          {a.other && (
+                          {/* The HR the applicant says referred them, and — on
+                              applications taken before the form asked that —
+                              whatever they typed under the old "Other" box.
+                              Shown in full rather than truncated. */}
+                          {(a.hr_name || a.other) && (
                             <p className="mt-1.5 max-w-[28ch] rounded-md border-l-2 border-accent bg-subtle px-2 py-1 text-xs break-words text-fg-secondary">
-                              <span className="font-semibold text-fg-muted">Other: </span>
-                              {a.other}
+                              <span className="font-semibold text-fg-muted">
+                                {a.hr_name ? "HR: " : "Other: "}
+                              </span>
+                              {a.hr_name || a.other}
                             </p>
                           )}
                         </td>
-                        <td className="px-4 py-3 font-semibold text-fg">{money(a.amount)}</td>
+                        {/* Cash is settled at the desk, so the applicant
+                            never states an amount — an HR records it against
+                            the student after taking it. Showing 0 here would
+                            read as "paid nothing" rather than "not yet
+                            counted". */}
+                        <td className="px-4 py-3 font-semibold text-fg">
+                          {a.amount == null ? (
+                            <span className="font-medium text-fg-muted">Cash · at desk</span>
+                          ) : (
+                            money(a.amount)
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-xs text-fg-muted">
                           {a.created_at ? shortDate(a.created_at) : "—"}
                         </td>

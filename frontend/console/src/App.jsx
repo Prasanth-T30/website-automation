@@ -10,6 +10,7 @@ import Dashboard from "@/routes/Dashboard";
 import Login from "@/routes/Login";
 import NotFound from "@/routes/NotFound";
 import Notifications from "@/routes/Notifications";
+import Events from "@/routes/Events";
 import Payments from "@/routes/Payments";
 import Reports from "@/routes/Reports";
 import Settings from "@/routes/Settings";
@@ -44,6 +45,7 @@ export default function App() {
         <Route path="/batches" element={<Batches />} />
         <Route path="/attendance" element={<Attendance />} />
         <Route path="/payments" element={<Payments />} />
+        <Route path="/events" element={<Events />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route

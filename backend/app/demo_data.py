@@ -26,6 +26,7 @@ from app.repositories.announcements import AnnouncementRepository
 from app.repositories.applications import ApplicationRepository
 from app.repositories.attendance import AttendanceRepository
 from app.repositories.batches import BatchRepository
+from app.repositories.events import EventRepository
 from app.repositories.payments import PaymentRepository
 from app.repositories.students import StudentRepository
 from app.repositories.users import UserRepository
@@ -79,6 +80,7 @@ def build(db) -> dict:
     apps = ApplicationRepository(db)
     students = StudentRepository(db)
     batches = BatchRepository(db)
+    events = EventRepository(db)
     payments = PaymentRepository(db)
     attendance = AttendanceRepository(db)
     announcements = AnnouncementRepository(db)
@@ -90,7 +92,8 @@ def build(db) -> dict:
     if admin is None or not hrs:
         raise RuntimeError("Run `python -m app.cli seed` first — no accounts to own the data.")
 
-    made = dict(batches=0, applications=0, students=0, payments=0, attendance=0, announcements=0)
+    made = dict(batches=0, applications=0, students=0, payments=0,
+                attendance=0, announcements=0, events=0)
 
     # ── Batches ──────────────────────────────────────────────────────────
     # The first one ends in three days, which is what puts names on the
@@ -115,16 +118,32 @@ def build(db) -> dict:
 
     # ── Students, via real applications so they trace back to a registration
     # ── (that is what the offer-letter and certificate screens read) ──────
-    def registration(person, *, domain, duration, starts, ends, amount, category="Internship"):
+    def registration(person, *, domain, duration, starts, ends, amount,
+                     category="Internship", method="upi", hr_name=None):
+        """One public registration.
+
+        `method="cash"` builds the shape a cash submission actually arrives
+        in — no amount, no reference, no screenshot — rather than a UPI row
+        with the method relabelled, so the console screens are exercised
+        against the real thing.
+        """
         title, name, college, place, native, year = person
+        cash = method == "cash"
         return apps.create(
             title=title, name=name, email=_email_for(name), phone=_phone(),
             college=college, place=place, department="CSE", year="Final",
             applicant_type="student", category=category, domain=domain,
             duration=duration, start_date=starts, end_date=ends,
-            amount=amount, transaction_id=f"TXN{_RNG.randint(10**7, 10**8 - 1)}",
+            payment_method=method,
+            amount=None if cash else amount,
+            transaction_id=None if cash else f"TXN{_RNG.randint(10**7, 10**8 - 1)}",
             payment_screenshot=None, mode="Offline", project_topic=None,
-            other=None, native_place=native, passed_out_year=year, declaration=True,
+            # Required on the public form, so every sample row carries one —
+            # otherwise the console's "HR:" line would be blank everywhere
+            # and the field would look broken rather than mandatory.
+            hr_name=hr_name or _RNG.choice([h.full_name for h in hrs]),
+            other=None, native_place=native,
+            passed_out_year=year, declaration=True,
         )
 
     enrolled = []
@@ -215,6 +234,15 @@ def build(db) -> dict:
         apps.claim(a.id, hrs[0].id)
         made["applications"] += 1
 
+    # Paying at the desk rather than online: these arrive with no amount and
+    # no reference at all, and read as "Cash · at desk" in the queue until an
+    # HR records what was actually collected.
+    for person, referred_by in zip(_PEOPLE[3:5], [h.full_name for h in hrs], strict=False):
+        registration(person, domain="Web Development", duration="30 Days",
+                     starts=_iso(10), ends=_iso(40), amount=0,
+                     method="cash", hr_name=referred_by)
+        made["applications"] += 1
+
     # Rejected straight through the repository: the HTTP endpoint emails the
     # applicant, and sample data has no business sending real mail.
     rejected = registration(_PEOPLE[2], domain="Business Analytics", duration="15 Days",
@@ -235,6 +263,30 @@ def build(db) -> dict:
                 status="present" if _RNG.random() > 0.12 else "absent", notes=None,
             )
             made["attendance"] += 1
+
+    # ── Off-campus events, spread across the HRs ─────────────────────────
+    # Private to whoever owns them, so signing in as two different HRs shows
+    # two different Events pages — which is the whole point of the feature.
+    # Every kind is represented, and some still have money outstanding so the
+    # "to receive" column is not uniformly zero.
+    event_plan = [
+        ("workshop", "Anna University", 60, 30000, 20000, -40, -38, 2),
+        ("bootcamp", "PSG College of Technology", 45, 75000, 0, -30, -24, 6),
+        ("training_program", "Kongu Engineering College", 120, 180000, 45000, -60, -20, 15),
+        ("addon_course", "Thiagarajar College", 35, 42000, 8000, -21, -7, 10),
+        ("industrial_visit", "SSN College of Engineering", 90, 27000, 0, -14, -14, 1),
+        ("workshop", "Sri Krishna College", 55, 25000, 12500, -9, -8, 2),
+    ]
+    for i, (kind, college, heads, got, owed, starts, ends, days) in enumerate(event_plan):
+        owner = hrs[i % len(hrs)]
+        events.create(
+            owner_id=owner.id, recorded_by_id=owner.id,
+            event_type=kind, college=college, student_count=heads,
+            amount_collected=got, amount_receivable=owed,
+            start_date=_iso(starts), end_date=_iso(ends), days_conducted=days,
+            notes=None,
+        )
+        made["events"] += 1
 
     # ── Announcements ────────────────────────────────────────────────────
     for title, body, level in [

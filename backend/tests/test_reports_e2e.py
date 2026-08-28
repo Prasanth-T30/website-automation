@@ -112,6 +112,7 @@ def test_report_can_be_linked_to_a_student(client: TestClient, user_repo):
         "applicant_type": "student", "category": "Project", "domain": "Software Testing",
         "duration": "30 Days", "start_date": "2026-09-01", "end_date": "2026-10-01",
         "amount": "5000", "transaction_id": _unique("TXN"), "declaration": "true",
+        "hr_name": "Aruna Devi",
     }
     files = {"payment_screenshot": ("proof.png", io.BytesIO(b"fake"), "image/png")}
     submitted = client.post("/api/v1/public/applications", data=form, files=files)
@@ -287,6 +288,7 @@ def test_registration_details_reach_the_certificate(client: TestClient, user_rep
         "domain": "Full Stack Java", "duration": "30 Days",
         "start_date": "2026-09-01", "end_date": "2026-10-01",
         "amount": "18000", "transaction_id": _unique("TXN"), "declaration": "true",
+        "hr_name": "Aruna Devi",
     }
     files = {"payment_screenshot": ("proof.png", io.BytesIO(b"fake"), "image/png")}
     app_id = client.post("/api/v1/public/applications", data=form, files=files).json()["id"]

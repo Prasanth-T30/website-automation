@@ -68,6 +68,7 @@ def _create_approved_student(client: TestClient, csrf: str) -> str:
         "applicant_type": "student", "category": "Project", "domain": "Software Testing",
         "duration": "30 Days", "start_date": "2026-09-01", "end_date": "2026-10-01",
         "amount": "5000", "transaction_id": _unique("TXN"), "declaration": "true",
+        "hr_name": "Aruna Devi",
     }
     files = {"payment_screenshot": ("proof.png", io.BytesIO(b"fake"), "image/png")}
     submitted = client.post("/api/v1/public/applications", data=form, files=files)
@@ -415,7 +416,10 @@ def _make_batch(client: TestClient, csrf: str, *, capacity: int) -> dict:
     return res.json()
 
 
-def test_a_student_can_be_added_to_and_removed_from_a_batch(client: TestClient, user_repo):
+def test_a_student_can_be_added_by_an_hr_and_removed_by_an_admin(
+    client: TestClient, user_repo
+):
+    """The round trip, each half done by whoever is now allowed to do it."""
     csrf = _login_as(client, user_repo, role=UserRole.hr)
     batch = _make_batch(client, csrf, capacity=5)
     sid = _manual_student(client, csrf, "Roster Member")
@@ -429,14 +433,13 @@ def test_a_student_can_be_added_to_and_removed_from_a_batch(client: TestClient, 
     assert sid in {s["id"] for s in client.get(
         "/api/v1/students", params={"batch_id": batch["id"]}).json()}
 
+    admin_csrf = _login_as(client, user_repo, role=UserRole.admin)
     removed = client.patch(
         f"/api/v1/students/{sid}",
-        json={"batch_id": None}, headers={"X-CSRF-Token": csrf},
+        json={"batch_id": None}, headers={"X-CSRF-Token": admin_csrf},
     )
     assert removed.status_code == 200, removed.text
     assert removed.json()["batch_id"] is None
-    assert sid not in {s["id"] for s in client.get(
-        "/api/v1/students", params={"batch_id": batch["id"]}).json()}
 
 
 def test_a_full_batch_refuses_another_student(client: TestClient, user_repo):
@@ -491,16 +494,23 @@ def test_a_seat_taken_by_another_hr_still_counts_against_capacity(
 
 
 def test_freeing_a_seat_lets_the_next_student_in(client: TestClient, user_repo):
+    """Capacity is counted from who is actually in the batch, so an admin's
+    removal has to give the seat back."""
     csrf = _login_as(client, user_repo, role=UserRole.hr)
     batch = _make_batch(client, csrf, capacity=1)
     first = _manual_student(client, csrf, "Leaves")
     second = _manual_student(client, csrf, "Arrives")
+    hr_email = _my_email(client)
 
     client.patch(f"/api/v1/students/{first}",
                  json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf})
-    client.patch(f"/api/v1/students/{first}",
-                 json={"batch_id": None}, headers={"X-CSRF-Token": csrf})
 
+    admin_csrf = _login_as(client, user_repo, role=UserRole.admin)
+    assert client.patch(f"/api/v1/students/{first}",
+                        json={"batch_id": None},
+                        headers={"X-CSRF-Token": admin_csrf}).status_code == 200
+
+    csrf = _relogin(client, hr_email)
     res = client.patch(f"/api/v1/students/{second}",
                        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf})
     assert res.status_code == 200, res.text
@@ -540,18 +550,22 @@ def test_the_students_list_stays_scoped_even_when_filtered_by_batch(
 # ── Batch ownership: shared to see, creator's to fill ────────────────────
 
 
-def test_only_the_batch_creator_can_add_students_to_it(client: TestClient, user_repo):
+def test_any_hr_can_add_students_to_anyones_batch(client: TestClient, user_repo):
+    """Batches are the institute's cohorts, not one HR's property. Gating
+    placement on who created the batch meant a student could only join the
+    cohort actually teaching their domain if the right colleague happened to
+    be available to do it."""
     csrf_a = _login_as(client, user_repo, role=UserRole.hr)
     batch = _make_batch(client, csrf_a, capacity=10)
 
     csrf_b = _login_as(client, user_repo, role=UserRole.hr)
-    theirs = _manual_student(client, csrf_b, "Not Yours To Place")
+    theirs = _manual_student(client, csrf_b, "Placed By A Colleague")
     res = client.patch(
         f"/api/v1/students/{theirs}",
         json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf_b},
     )
-    assert res.status_code == 403, res.text
-    assert "created" in res.json()["detail"].lower()
+    assert res.status_code == 200, res.text
+    assert res.json()["batch_id"] == batch["id"]
 
 
 def test_an_admin_can_add_students_to_anyones_batch(client: TestClient, user_repo):
@@ -567,27 +581,39 @@ def test_an_admin_can_add_students_to_anyones_batch(client: TestClient, user_rep
     assert res.status_code == 200, res.text
 
 
-def test_a_students_own_hr_can_always_withdraw_them(client: TestClient, user_repo):
-    """Nobody's student gets stranded in a cohort only someone else can touch."""
-    csrf_a = _login_as(client, user_repo, role=UserRole.hr)
-    batch = _make_batch(client, csrf_a, capacity=10)
-
-    csrf_b = _login_as(client, user_repo, role=UserRole.hr)
-    b_email = _my_email(client)
-    b_student = _manual_student(client, csrf_b, "Belongs To B")
-
-    # Admin puts B's student into A's batch — B could not have done it.
-    admin_csrf = _login_as(client, user_repo, role=UserRole.admin)
+def test_not_even_a_students_own_hr_can_withdraw_them(client: TestClient, user_repo):
+    """Removal strands the attendance already marked against the student in a
+    cohort they are no longer part of, so it is an administrator's call —
+    including for the HR who owns the student and placed them there."""
+    csrf = _login_as(client, user_repo, role=UserRole.hr)
+    batch = _make_batch(client, csrf, capacity=10)
+    sid = _manual_student(client, csrf, "Mine To Place, Not To Pull")
     assert client.patch(
-        f"/api/v1/students/{b_student}",
-        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": admin_csrf},
+        f"/api/v1/students/{sid}",
+        json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf},
     ).status_code == 200
 
-    # B still owns them, so B can pull them back out.
-    csrf_b = _relogin(client, b_email)
     res = client.patch(
-        f"/api/v1/students/{b_student}",
-        json={"batch_id": None}, headers={"X-CSRF-Token": csrf_b},
+        f"/api/v1/students/{sid}",
+        json={"batch_id": None}, headers={"X-CSRF-Token": csrf},
+    )
+    assert res.status_code == 403, res.text
+    assert "administrator" in res.json()["detail"].lower()
+    # And they really are still in the batch, not merely refused a response.
+    assert client.get(f"/api/v1/students/{sid}").json()["batch_id"] == batch["id"]
+
+
+def test_an_admin_can_withdraw_anyones_student(client: TestClient, user_repo):
+    csrf = _login_as(client, user_repo, role=UserRole.hr)
+    batch = _make_batch(client, csrf, capacity=10)
+    sid = _manual_student(client, csrf, "Withdrawn By Admin")
+    client.patch(f"/api/v1/students/{sid}",
+                 json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf})
+
+    admin_csrf = _login_as(client, user_repo, role=UserRole.admin)
+    res = client.patch(
+        f"/api/v1/students/{sid}",
+        json={"batch_id": None}, headers={"X-CSRF-Token": admin_csrf},
     )
     assert res.status_code == 200, res.text
     assert res.json()["batch_id"] is None
@@ -673,15 +699,20 @@ def test_any_hr_can_place_students_into_an_admin_created_batch(
     assert res.status_code == 200, res.text
 
 
-def test_an_hrs_own_batch_stays_closed_to_their_colleagues(client: TestClient, user_repo):
-    """The admin exception must not leak into HR-created batches."""
+def test_an_hrs_own_batch_is_open_to_their_colleagues(client: TestClient, user_repo):
+    """Opening placement applies to HR-created batches too, not only the ones
+    an admin made — those are the batches HRs actually use."""
     csrf_a = _login_as(client, user_repo, role=UserRole.hr)
     batch = _make_batch(client, csrf_a, capacity=10)
 
     csrf_b = _login_as(client, user_repo, role=UserRole.hr)
-    sid = _manual_student(client, csrf_b, "Kept Out")
+    sid = _manual_student(client, csrf_b, "Let In")
     res = client.patch(
         f"/api/v1/students/{sid}",
         json={"batch_id": batch["id"]}, headers={"X-CSRF-Token": csrf_b},
     )
-    assert res.status_code == 403
+    assert res.status_code == 200, res.text
+
+    # Capacity is still shared and still enforced across HRs.
+    card = next(b for b in client.get("/api/v1/batches").json() if b["id"] == batch["id"])
+    assert card["student_count"] == 1

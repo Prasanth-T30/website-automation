@@ -9,13 +9,21 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from app.core.constants import (
     CATEGORY_CHOICES,
     DOMAIN_CHOICES,
     DURATION_CHOICES,
     MODE_CHOICES,
+    PAYMENT_METHODS,
     TITLE_CHOICES,
     canonical_domain,
 )
@@ -38,8 +46,13 @@ class ApplicationCreate(BaseModel):
     start_date: date
     end_date: date
 
-    amount: float = Field(gt=0)
-    transaction_id: str = Field(min_length=4, max_length=50)
+    # Cash is settled at the desk, so the applicant has no reference to quote
+    # and no screenshot to upload — the HR enters the amount once they have
+    # taken it. Only a UPI payment carries an amount and a transaction id at
+    # registration time, so both are optional here and enforced below.
+    payment_method: str = "upi"
+    amount: float | None = Field(default=None, gt=0)
+    transaction_id: str | None = Field(default=None, min_length=4, max_length=50)
     # payment_screenshot is set by the router after the upload step, not by
     # the client — a filename can't be trusted as a request field.
 
@@ -50,13 +63,59 @@ class ApplicationCreate(BaseModel):
     # the form has to send a field it never collected.
     mode: str | None = None
     project_topic: str | None = Field(default=None, max_length=200)
-    # Optional note from the applicant. Bounded so the public form cannot be
-    # used to write unbounded data into the database.
+    # The HR who referred this applicant, as the applicant typed it. Free text
+    # rather than a picked user: the applicant knows a name, not an account,
+    # and the form is public so it cannot list staff. Bounded so the public
+    # form cannot be used to write unbounded data into the database.
+    #
+    # Required. Typed as optional so a request that omits the field entirely
+    # reaches the validator below and gets a sentence back, rather than
+    # pydantic's "Input should be a valid string" — and so the rule lives in
+    # one place instead of being split between the type and a check.
+    hr_name: str | None = Field(default=None, max_length=1000, validate_default=True)
+    # This field used to be a free-text "Other" note and is still read back on
+    # applications taken before it became `hr_name`.
     other: str | None = Field(default=None, max_length=1000)
     # Native town/district, and the year of passing out. Optional so the
     # older deployed form — which does not collect either — keeps submitting.
     native_place: str | None = Field(default=None, max_length=100)
     passed_out_year: str | None = None
+
+    @field_validator("hr_name")
+    @classmethod
+    def _hr_name_is_required(cls, v: str | None) -> str:
+        name = (v or "").strip()
+        if len(name) < 2:
+            raise ValueError("Please enter the name of the HR who guided you.")
+        return name
+
+    @field_validator("payment_method")
+    @classmethod
+    def _known_payment_method(cls, v: str) -> str:
+        method = (v or "upi").strip().lower()
+        if method not in PAYMENT_METHODS:
+            raise ValueError(f"Payment method must be one of {', '.join(PAYMENT_METHODS)}.")
+        return method
+
+    @model_validator(mode="after")
+    def _payment_details_match_the_method(self) -> ApplicationCreate:
+        """A UPI registration must carry what makes it checkable.
+
+        Without this the optional fields above would let a UPI submission
+        through with no reference at all, which is exactly the case the
+        transaction-id index exists to catch.
+        """
+        if self.payment_method == "upi":
+            if self.amount is None:
+                raise ValueError("Amount paid is required for a UPI payment.")
+            if not self.transaction_id:
+                raise ValueError("Transaction ID is required for a UPI payment.")
+        else:
+            # Whatever a cash submission sent is discarded: the desk decides
+            # the amount, and there is no reference to hold.
+            self.amount = None
+            self.transaction_id = None
+        return self
 
     @field_validator("native_place")
     @classmethod
@@ -170,11 +229,13 @@ class ApplicationOut(BaseModel):
     duration: str
     start_date: str
     end_date: str
-    amount: float
-    transaction_id: str
+    payment_method: str = "upi"
+    amount: float | None = None
+    transaction_id: str | None = None
     payment_screenshot: str | None = None
     mode: str | None = None
     project_topic: str | None = None
+    hr_name: str | None = None
     other: str | None = None
     native_place: str | None = None
     passed_out_year: str | None = None

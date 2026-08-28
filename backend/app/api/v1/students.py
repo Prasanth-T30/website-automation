@@ -203,7 +203,6 @@ def update_student(
     data: StudentUpdate,
     students: StudentRepo,
     batches: BatchRepo,
-    users: UserRepo,
     user: ActiveUser,
 ) -> StudentOut:
     s = _get_or_404(students, student_id)
@@ -216,6 +215,18 @@ def update_student(
     # could read "30 / 20" and the overflow was invisible until someone
     # counted. Occupancy is the true total across every HR, because a seat
     # taken by a colleague's student is just as taken.
+    # Taking a student out of a batch is an administrator's call. Removal
+    # strands their attendance in a cohort they are no longer part of, and
+    # unlike placement it is not something a second person can simply redo.
+    removing = "batch_id" in changes and changes["batch_id"] is None and s.batch_id
+    if removing and user.role is not UserRole.admin:
+        current = batches.get(s.batch_id)
+        where = f" {current.code}" if current else ""
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail=f"Only an administrator can remove {s.name} from batch{where}.",
+        )
+
     new_batch_id = changes.get("batch_id")
     if new_batch_id and new_batch_id != s.batch_id:
         # A student belongs to one cohort and stays there. Attendance, the
@@ -239,33 +250,11 @@ def update_student(
         batch = batches.get(new_batch_id)
         if batch is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="That batch does not exist.")
-        # A batch belongs to whoever set it up: they picked the domain, the
-        # dates and the size, so who fills the seats is theirs to decide.
-        # Everyone else can see the cohort without being able to put people
-        # in it.
-        #
-        # An admin-created batch is the exception, and deliberately so: it is
-        # an institute-wide cohort rather than one HR's, and gating it to the
-        # admin alone would mean an institute that sets its batches up
-        # centrally leaves every HR unable to place a single student.
-        creator = batch.created_by_id
-        creator_is_admin = bool(creator) and (
-            (owner := users.get(creator)) is not None and owner.role is UserRole.admin
-        )
-        may_place = (
-            user.role is UserRole.admin
-            or creator == user.id
-            or creator_is_admin
-            or creator is None
-        )
-        if not may_place:
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                detail=(
-                    f"Only the HR who created batch {batch.code}, or an administrator, "
-                    "can add students to it."
-                ),
-            )
+        # Any HR may place a student in any batch. Batches are the
+        # institute's cohorts rather than one person's property, and gating
+        # placement on who happened to create the batch meant an HR with a
+        # student ready to start had to find that person first. Capacity is
+        # the real constraint, and it is checked below.
         occupied = len(students.list_all(batch_id=new_batch_id))
         if batch.capacity and occupied >= batch.capacity:
             raise HTTPException(

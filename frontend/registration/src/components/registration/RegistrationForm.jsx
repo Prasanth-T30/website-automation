@@ -13,7 +13,7 @@ const DatePicker = ReactDatePicker.default ?? ReactDatePicker;
 
 import Button from "../common/Button";
 import Input from "../common/Input";
-import { CATEGORY_LABELS, DOMAIN_CHOICES, DURATION_CHOICES, MODE_CHOICES, TITLE_CHOICES, YEAR_CHOICES, passedOutYearChoices } from "../../utils/constants";
+import { CATEGORY_LABELS, DOMAIN_CHOICES, DURATION_CHOICES, MODE_CHOICES, PAYMENT_METHOD_CASH, PAYMENT_METHOD_CHOICES, PAYMENT_METHOD_UPI, TITLE_CHOICES, YEAR_CHOICES, passedOutYearChoices } from "../../utils/constants";
 import { submitRegistration } from "../../services/registrationService";
 import { useAutofillSync } from "../../hooks/useAutofillSync";
 import { verifyPaymentScreenshot } from "../../utils/paymentVerification";
@@ -74,7 +74,7 @@ const RegistrationForm = () => {
   } = useForm({
     mode: "onTouched",
     reValidateMode: "onChange",
-    defaultValues: { applicant_type: "student", category: "Internship" },
+    defaultValues: { applicant_type: "student", category: "Internship", payment_method: PAYMENT_METHOD_UPI },
   });
 
   useAutofillSync(formRef, setValue);
@@ -84,6 +84,7 @@ const RegistrationForm = () => {
   const categoryLabels = CATEGORY_LABELS[selectedCategory] || CATEGORY_LABELS.Internship;
   const isProfessional = applicantType === "professional";
   const isProjectCategory = selectedCategory === "Project";
+  const isCashPayment = watch("payment_method") === PAYMENT_METHOD_CASH;
   const progress = `${(step / STEPS.length) * 100}%`;
 
   // Working professionals only register for a Course or a Project — Internship is student-only.
@@ -125,8 +126,12 @@ const RegistrationForm = () => {
     1: ["salutation", "name", "email", "phone", "college", "place", "native_place", "passed_out_year"],
     2: ["category"],
     3: isProjectCategory ? ["project_topic", "domain"] : ["domain", "duration", "start_date", "end_date", "mode"],
-    4: ["amount", "transaction_id", "declaration"],
-  }), [isProjectCategory]);
+    // Cash asks for none of the payment details, so validating them would
+    // block Continue on fields the step no longer shows.
+    4: isCashPayment
+      ? ["payment_method", "hr_name", "declaration"]
+      : ["payment_method", "amount", "transaction_id", "hr_name", "declaration"],
+  }), [isProjectCategory, isCashPayment]);
 
   const phoneField = register("phone", {
     required: "Mobile number is required",
@@ -171,7 +176,7 @@ const RegistrationForm = () => {
   };
 
   const onSubmit = async (values) => {
-    if (!file) {
+    if (!isCashPayment && !file) {
       toast.error("Please upload your payment screenshot");
       return;
     }
@@ -183,27 +188,34 @@ const RegistrationForm = () => {
     // Check the payment screenshot against the typed amount and UPI transaction ID.
     // The registration only proceeds once at least two of the three checks pass
     // (looks like a real payment screenshot, amount matches, transaction ID matches).
-    setVerifying(true);
-    let verification;
-    try {
-      verification = await verifyPaymentScreenshot(file, values.amount, values.transaction_id);
-    } finally {
-      setVerifying(false);
-    }
+    // Cash has no screenshot to check it against, so there is nothing to
+    // verify — the amount is confirmed at the desk instead.
+    if (!isCashPayment) {
+      setVerifying(true);
+      let verification;
+      try {
+        verification = await verifyPaymentScreenshot(file, values.amount, values.transaction_id);
+      } finally {
+        setVerifying(false);
+      }
 
-    if (!verification.isValid) {
-      setResultOverlay({
-        status: "failure",
-        message: "We couldn't verify this payment screenshot against the amount and UPI transaction ID you entered. Please double-check them and try again.",
-      });
-      return;
+      if (!verification.isValid) {
+        setResultOverlay({
+          status: "failure",
+          message: "We couldn't verify this payment screenshot against the amount and UPI transaction ID you entered. Please double-check them and try again.",
+        });
+        return;
+      }
     }
 
     const formData = new FormData();
     Object.entries(values).forEach(([key, value]) => {
+      // A cash registration states no amount and no reference. Sending the
+      // keys empty would post "" where the backend expects a number.
+      if (isCashPayment && (key === "amount" || key === "transaction_id")) return;
       formData.append(key, key === "declaration" ? (value ? "true" : "false") : value ?? "");
     });
-    formData.append("payment_screenshot", file);
+    if (file) formData.append("payment_screenshot", file);
 
     setSubmitting(true);
     try {
@@ -516,35 +528,80 @@ const RegistrationForm = () => {
       {step === 4 && (
         <section className="dv-section">
           <h2 className="mb-1 text-base font-extrabold text-[#0F1B2D]">Payment section</h2>
-          <p className="mb-4 text-xs font-medium text-[#6B7A90]">Upload a clear screenshot after completing payment.</p>
+          <p className="mb-4 text-xs font-medium text-[#6B7A90]">
+            {isCashPayment
+              ? "Choose how you are paying. Cash is settled at our office."
+              : "Upload a clear screenshot after completing payment."}
+          </p>
           <div className="rounded-2xl border border-[#DEE7F1] bg-[#FBFCFE] p-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Input label="Amount Paid (Rs.)" type="number" step="0.01" required error={errors.amount?.message} {...register("amount", { required: "Amount paid is required" })} />
-              <Input label="UPI Transaction ID" required error={errors.transaction_id?.message} {...register("transaction_id", { required: "Transaction ID is required" })} />
+            <div className="flex justify-center">
+              <div className="w-full sm:w-1/2">
+                <Input as="select" label="Payment Method" required error={errors.payment_method?.message} {...register("payment_method", { required: "Please select how you are paying" })}>
+                  {PAYMENT_METHOD_CHOICES.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </Input>
+              </div>
             </div>
-            <div className="mt-4">
-              <PaymentUpload file={file} onChange={setFile} />
-            </div>
+
+            {/* A cash payment is settled at our desk, so there is nothing for
+                the applicant to state or prove here — no amount, no reference,
+                no screenshot. The HR records what was actually taken. Asking
+                anyway would be asking them to promise a number before paying. */}
+            {isCashPayment ? (
+              <p className="mt-4 rounded-[14px] border border-[#DEE7F1] bg-white px-4 py-3 text-xs font-medium leading-6 text-[#5A6B82]">
+                Pay in cash at the DVein Innovations office. Our HR team will
+                record the amount against your registration once it is
+                collected — you do not need to enter anything here.
+              </p>
+            ) : (
+              <>
+                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Input label="Amount Paid (Rs.)" type="number" step="0.01" required error={errors.amount?.message} {...register("amount", { required: "Amount paid is required" })} />
+                  <Input label="UPI Transaction ID" required error={errors.transaction_id?.message} {...register("transaction_id", { required: "Transaction ID is required" })} />
+                </div>
+                <div className="mt-4">
+                  <PaymentUpload file={file} onChange={setFile} />
+                </div>
+              </>
+            )}
           </div>
 
-          {/* Free text. Whatever is typed here is shown to the HR reviewing the
-              registration, so an applicant can raise anything the form itself
-              does not ask about. */}
+          {/* Who referred this applicant. Free text rather than a picked
+              name: the form is public, so it cannot list staff, and the
+              applicant knows a person rather than an account. The HR
+              reviewing the registration sees exactly what was typed.
+
+              Required, and enforced on the server too — this is how a
+              registration gets attributed to the person who brought it in. */}
           <div className="mt-4">
-            <label className="mb-1.5 block text-xs font-bold text-[#0F1B2D]" htmlFor="other">
-              Other
+            <label className="mb-1.5 block text-xs font-bold text-[#0F1B2D]" htmlFor="hr_name">
+              HR name <span className="text-[#C2453F]">*</span>
             </label>
-            <textarea
-              id="other"
-              rows={3}
+            <input
+              id="hr_name"
+              type="text"
               maxLength={1000}
-              placeholder="Anything else you would like us to know (optional)"
+              placeholder="Name of the HR who guided you"
               className="w-full rounded-[14px] border border-[#DCE4EE] bg-white px-4 py-3 text-sm font-medium text-[#0F1B2D] outline-none transition placeholder:text-[#9AA8BC] focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20"
-              {...register("other", { maxLength: 1000 })}
+              {...register("hr_name", {
+                required: "HR name is required",
+                maxLength: 1000,
+                // Trimmed, so a field holding only spaces is not treated as
+                // filled in — which is what `required` alone would allow.
+                validate: (value) =>
+                  (value ?? "").trim().length >= 2 || "Enter the name of the HR who guided you",
+              })}
             />
-            <p className="mt-1 text-[11px] font-medium text-[#8494A9]">
-              Optional. Our team sees this when reviewing your registration.
-            </p>
+            {errors.hr_name?.message ? (
+              <p data-error-message className="mt-1 text-xs font-medium text-[#C2453F]">
+                {errors.hr_name.message}
+              </p>
+            ) : (
+              <p className="mt-1 text-[11px] font-medium text-[#8494A9]">
+                The DVein HR who guided you through this registration.
+              </p>
+            )}
           </div>
 
           <label className="mt-4 flex items-start gap-3 rounded-[14px] border border-[#DCE4EE] bg-white p-4 text-sm font-medium leading-6 text-[#5A6B82]">

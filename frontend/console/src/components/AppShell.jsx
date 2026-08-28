@@ -4,6 +4,7 @@ import {
   Banknote,
   Bell,
   CalendarCheck,
+  CalendarRange,
   FileText,
   GraduationCap,
   LayoutDashboard,
@@ -79,6 +80,9 @@ const GROUPS = [
     label: "Finance",
     items: [
       { to: "/payments", label: "Payments", icon: Banknote, count: "payments" },
+      // No count badge: the number of events is private to each HR, and the
+      // shared counts endpoint is the same for everyone.
+      { to: "/events", label: "Events", icon: CalendarRange },
       { to: "/reports", label: "Documents", icon: Award, count: "reports" },
     ],
   },

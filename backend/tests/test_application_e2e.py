@@ -69,7 +69,7 @@ def _submit_application(client: TestClient, *, transaction_id: str, category: st
         "end_date": "2026-10-01",
         "amount": "6000",
         "transaction_id": transaction_id,
-        "declaration": "true",
+        "hr_name": "Aruna Devi", "declaration": "true",
     }
     files = {"payment_screenshot": ("proof.png", io.BytesIO(b"\x89PNG\r\n fake"), "image/png")}
     return client.post("/api/v1/public/applications", data=form, files=files)
@@ -90,7 +90,7 @@ def test_submission_rejects_unchecked_declaration(client: TestClient):
         "college": "College", "place": "Chennai", "applicant_type": "student",
         "category": "Internship", "domain": "Full Stack Python", "duration": "30 Days",
         "start_date": "2026-09-01", "end_date": "2026-10-01", "amount": "6000",
-        "transaction_id": _unique("TXN"), "declaration": "false",
+        "transaction_id": _unique("TXN"), "hr_name": "Aruna Devi", "declaration": "false",
     }
     files = {"payment_screenshot": ("proof.png", io.BytesIO(b"fake"), "image/png")}
     res = client.post("/api/v1/public/applications", data=form, files=files)
@@ -103,7 +103,7 @@ def test_submission_rejects_bad_file_type(client: TestClient):
         "college": "College", "place": "Chennai", "applicant_type": "student",
         "category": "Internship", "domain": "Full Stack Python", "duration": "30 Days",
         "start_date": "2026-09-01", "end_date": "2026-10-01", "amount": "6000",
-        "transaction_id": _unique("TXN"), "declaration": "true",
+        "transaction_id": _unique("TXN"), "hr_name": "Aruna Devi", "declaration": "true",
     }
     files = {"payment_screenshot": ("proof.pdf", io.BytesIO(b"%PDF fake"), "application/pdf")}
     res = client.post("/api/v1/public/applications", data=form, files=files)
@@ -270,6 +270,7 @@ def _live_site_payload(**overrides) -> dict:
         "mode": "Online",
         "start_date": "2026-09-01", "end_date": "2026-10-01",
         "amount": "18000", "transaction_id": _unique("TXN"), "declaration": "true",
+        "hr_name": "Aruna Devi",
     }
     form.update(overrides)
     return form
@@ -357,6 +358,7 @@ def _payload_with(**extra) -> dict:
         "category": "Internship", "domain": "Full Stack Python", "duration": "30 Days",
         "start_date": "2026-09-01", "end_date": "2026-10-01",
         "amount": "12000", "transaction_id": _unique("TXN"), "declaration": "true",
+        "hr_name": "Aruna Devi",
     }
     form.update(extra)
     return form

@@ -78,6 +78,7 @@ def _create_approved_student(client: TestClient, csrf: str, *, amount: str = "50
         "applicant_type": "student", "category": "Project", "domain": "Software Testing",
         "duration": "30 Days", "start_date": "2026-09-01", "end_date": "2026-10-01",
         "amount": amount, "transaction_id": _unique("TXN"), "declaration": "true",
+        "hr_name": "Aruna Devi",
     }
     files = {"payment_screenshot": ("proof.png", io.BytesIO(b"fake"), "image/png")}
     submitted = client.post("/api/v1/public/applications", data=form, files=files)

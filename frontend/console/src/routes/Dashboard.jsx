@@ -25,6 +25,7 @@ import { adminApi } from "@/features/admin/api";
 import { attendanceApi } from "@/features/attendance/api";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { batchesApi } from "@/features/batches/api";
+import { eventsApi } from "@/features/events/api";
 import { paymentsApi } from "@/features/payments/api";
 import { studentsApi } from "@/features/students/api";
 import { isOverdue } from "@/features/students/overdue";
@@ -85,6 +86,15 @@ export default function Dashboard() {
     queryFn: adminApi.hrPerformance,
     enabled: isAdmin,
   });
+  // Off-campus events never touch the fee ledger, so the transactions query
+  // above cannot see them — but they are the HR's money and belong in their
+  // total. An HR reads their own; an admin reads everyone's out of the
+  // performance report, which is the only place events cross an owner.
+  const myEvents = useQuery({
+    queryKey: ["events", "summary"],
+    queryFn: eventsApi.summary,
+    enabled: !isAdmin,
+  });
   // An HR is always pinned to themselves; an admin sees everyone until they
   // pick someone. Both the student and the money views follow the same choice,
   // so every tile on screen describes the same set of people.
@@ -97,6 +107,15 @@ export default function Dashboard() {
     () => (transactions.data ?? []).filter((t) => !focusedOwner || t.owner_id === focusedOwner),
     [transactions.data, focusedOwner],
   );
+  // Event money for whoever is currently in focus, from whichever source can
+  // legitimately see it.
+  const scopedEventRevenue = useMemo(() => {
+    if (!isAdmin) return myEvents.data?.amount_collected ?? 0;
+    const rows = hrPerformance.data ?? [];
+    const wanted = focusedOwner ? rows.filter((r) => r.id === focusedOwner) : rows;
+    return wanted.reduce((sum, r) => sum + (r.event_revenue_all_time ?? 0), 0);
+  }, [isAdmin, myEvents.data, hrPerformance.data, focusedOwner]);
+
   const stats = useMemo(() => {
     const batchesById = new Map((batches.data ?? []).map((b) => [b.id, b]));
     const overdueAmount = scopedStudents
@@ -105,10 +124,13 @@ export default function Dashboard() {
     return {
       totalStudents: scopedStudents.length,
       activeBatches: (batches.data ?? []).filter((b) => b.status === "active").length,
-      totalRevenue: scopedTransactions.reduce((sum, t) => sum + t.amount, 0),
+      feeRevenue: scopedTransactions.reduce((sum, t) => sum + t.amount, 0),
+      eventRevenue: scopedEventRevenue,
+      totalRevenue:
+        scopedTransactions.reduce((sum, t) => sum + t.amount, 0) + scopedEventRevenue,
       overdueAmount,
     };
-  }, [scopedStudents, batches.data, scopedTransactions]);
+  }, [scopedStudents, batches.data, scopedTransactions, scopedEventRevenue]);
   const months = useMemo(() => trailingMonths(TRAILING_MONTHS), []);
   const monthlyRegistrations = useMemo(
     () =>
@@ -154,7 +176,7 @@ export default function Dashboard() {
   const hrRows = useMemo(
     () =>
       [...(hrPerformance.data ?? [])].sort(
-        (a, b) => b.revenue_all_time - a.revenue_all_time,
+        (a, b) => b.total_revenue_all_time - a.total_revenue_all_time,
       ),
     [hrPerformance.data],
   );
@@ -204,7 +226,7 @@ export default function Dashboard() {
                   <option value="all">All HRs (institute total)</option>
                   {hrRows.map((r) => (
                     <option key={r.id} value={r.id}>
-                      {r.full_name} — {money(r.revenue_all_time)}
+                      {r.full_name} — {money(r.total_revenue_all_time)}
                     </option>
                   ))}
                 </select>
@@ -424,7 +446,7 @@ export default function Dashboard() {
               <Card>
                 <CardHeader
                   title="HR Performance"
-                  description="Applications claimed, converted, and revenue attributed to each HR."
+                  description="Applications claimed, converted, and revenue attributed to each HR — course fees plus the events they ran."
                 />
                 <CardBody className="!p-0">
                   {hrPerformance.isPending && <LoadingState label="Loading HR performance…" />}
@@ -433,7 +455,7 @@ export default function Dashboard() {
                   )}
                   {hrPerformance.data && hrPerformance.data.length > 0 && (
                     <div className="scroll-x">
-                      <table className="w-full min-w-[560px] text-sm">
+                      <table className="w-full min-w-[720px] text-sm">
                         <thead>
                           <tr className="border-b border-line-subtle bg-subtle/60 text-left">
                             {[
@@ -442,7 +464,9 @@ export default function Dashboard() {
                               "Converted",
                               "Conversion",
                               "Active Students",
-                              "Revenue (all-time)",
+                              "Fees",
+                              "Events",
+                              "Total (all-time)",
                             ].map((h) => (
                               <th
                                 key={h}
@@ -468,8 +492,14 @@ export default function Dashboard() {
                                 {Math.round(row.conversion_rate * 100)}%
                               </td>
                               <td className="px-4 py-3 text-fg-secondary">{row.active_students}</td>
-                              <td className="px-4 py-3 font-semibold text-fg">
+                              <td className="px-4 py-3 text-fg-secondary">
                                 {money(row.revenue_all_time)}
+                              </td>
+                              <td className="px-4 py-3 text-fg-secondary">
+                                {money(row.event_revenue_all_time ?? 0)}
+                              </td>
+                              <td className="px-4 py-3 font-semibold text-fg">
+                                {money(row.total_revenue_all_time ?? row.revenue_all_time)}
                               </td>
                             </tr>
                           ))}

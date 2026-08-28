@@ -61,6 +61,7 @@ def _approved_student(client: TestClient, csrf: str, *, amount: str = "5000") ->
         "domain": "Full Stack Java", "duration": "30 Days",
         "start_date": "2026-09-01", "end_date": "2026-10-01",
         "amount": amount, "transaction_id": _unique("TXN"), "declaration": "true",
+        "hr_name": "Aruna Devi",
     }
     files = {"payment_screenshot": ("proof.png", io.BytesIO(b"fake"), "image/png")}
     app_id = client.post("/api/v1/public/applications", data=form, files=files).json()["id"]
@@ -226,6 +227,7 @@ def test_approving_no_longer_emails_the_offer_letter(client: TestClient, user_re
         "domain": "Full Stack Java", "duration": "30 Days",
         "start_date": "2026-09-01", "end_date": "2026-10-01",
         "amount": "5000", "transaction_id": _unique("TXN"), "declaration": "true",
+        "hr_name": "Aruna Devi",
     }
     files = {"payment_screenshot": ("proof.png", io.BytesIO(b"fake"), "image/png")}
     app_id = client.post("/api/v1/public/applications", data=form, files=files).json()["id"]

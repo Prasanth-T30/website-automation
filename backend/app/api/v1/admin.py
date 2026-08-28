@@ -12,7 +12,14 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter
 
-from app.api.deps import AdminUser, ApplicationRepo, PaymentRepo, StudentRepo, UserRepo
+from app.api.deps import (
+    AdminUser,
+    ApplicationRepo,
+    EventRepo,
+    PaymentRepo,
+    StudentRepo,
+    UserRepo,
+)
 from app.core.config import settings
 from app.models.user import UserRole
 from app.schemas.admin import HrPerformanceOut
@@ -39,13 +46,19 @@ def hr_performance(
     applications: ApplicationRepo,
     students: StudentRepo,
     payments: PaymentRepo,
+    events: EventRepo,
     _: AdminUser,
 ) -> list[HrPerformanceOut]:
     all_users = users.list_all()
     all_applications = applications.list_all()
     all_students = students.list_all()
     all_payments = payments.list_all()
+    # The one place events are read across owners. They stay private per HR
+    # everywhere else; here each HR's events land only in that HR's own row.
+    all_events = events.list_all()
     month_start = _month_start_utc()
+    # Event dates are stored as ISO strings, so compare them as strings.
+    month_start_iso = month_start.date().isoformat()
 
     # Every HR gets a row even at zero, so the team is always fully listed.
     # Anyone else who actually owns revenue gets one too: an admin can claim an
@@ -56,6 +69,7 @@ def hr_performance(
         {a.owner_id for a in all_applications if a.owner_id}
         | {s.owner_id for s in all_students}
         | {p.owner_id for p in all_payments}
+        | {e.owner_id for e in all_events}
     )
     reported = [
         u for u in all_users if u.role is UserRole.hr or u.id in owners_with_activity
@@ -76,6 +90,14 @@ def hr_performance(
         revenue_this_month = sum(
             p.amount for p in hr_payments if p.created_at and p.created_at >= month_start
         )
+        hr_events = [e for e in all_events if e.owner_id == hr.id]
+        event_revenue_all_time = sum(e.amount_collected for e in hr_events)
+        # Dated by when the event ran, not when the row was typed — an HR
+        # catching up on last month's paperwork should not have it land in
+        # this month's figure.
+        event_revenue_this_month = sum(
+            e.amount_collected for e in hr_events if e.start_date >= month_start_iso
+        )
         rows.append(
             HrPerformanceOut(
                 id=hr.id,
@@ -91,9 +113,15 @@ def hr_performance(
                 active_students=active,
                 revenue_this_month=revenue_this_month,
                 revenue_all_time=revenue_all_time,
+                event_count=len(hr_events),
+                event_revenue_this_month=event_revenue_this_month,
+                event_revenue_all_time=event_revenue_all_time,
+                event_receivable=sum(e.amount_receivable for e in hr_events),
+                total_revenue_this_month=revenue_this_month + event_revenue_this_month,
+                total_revenue_all_time=revenue_all_time + event_revenue_all_time,
             )
         )
-    return sorted(rows, key=lambda r: r.revenue_all_time, reverse=True)
+    return sorted(rows, key=lambda r: r.total_revenue_all_time, reverse=True)
 
 
 @router.get("/smtp-check")

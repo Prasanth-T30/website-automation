@@ -14,6 +14,7 @@ from app.api.v1 import (
     auth,
     automation,
     batches,
+    events,
     notifications,
     payments,
     public,
@@ -34,6 +35,7 @@ api_router.include_router(students.router)
 api_router.include_router(batches.router)
 api_router.include_router(attendance.router)
 api_router.include_router(payments.router)
+api_router.include_router(events.router)
 api_router.include_router(admin.router)
 api_router.include_router(reports.router)
 api_router.include_router(notifications.router)

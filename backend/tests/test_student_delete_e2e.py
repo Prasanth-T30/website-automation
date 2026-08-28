@@ -66,6 +66,7 @@ def _enrolled_student(client: TestClient, csrf: str) -> dict:
         "domain": "Full Stack Java", "duration": "30 Days",
         "start_date": "2026-09-01", "end_date": "2026-10-01",
         "amount": "5000", "transaction_id": _unique("TXN"), "declaration": "true",
+        "hr_name": "Aruna Devi",
     }
     files = {"payment_screenshot": ("p.png", io.BytesIO(b"x"), "image/png")}
     app_id = client.post("/api/v1/public/applications", data=form, files=files).json()["id"]

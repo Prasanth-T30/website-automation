@@ -1,0 +1,104 @@
+"""Pydantic models for off-campus revenue events."""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.core.constants import EVENT_TYPES
+
+
+class EventBase(BaseModel):
+    event_type: str
+    college: str = Field(min_length=2, max_length=150)
+    student_count: int = Field(ge=0, le=100_000)
+    amount_collected: float = Field(ge=0)
+    amount_receivable: float = Field(ge=0)
+    start_date: date
+    end_date: date
+    days_conducted: int = Field(ge=0, le=3_650)
+    notes: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("event_type")
+    @classmethod
+    def _known_event_type(cls, v: str) -> str:
+        if v not in EVENT_TYPES:
+            raise ValueError(f"Event type must be one of {', '.join(EVENT_TYPES)}.")
+        return v
+
+    @field_validator("college")
+    @classmethod
+    def _tidy_college(cls, v: str) -> str:
+        return v.strip()
+
+    @model_validator(mode="after")
+    def _dates_run_forwards(self) -> EventBase:
+        if self.end_date < self.start_date:
+            raise ValueError("The event cannot end before it starts.")
+        return self
+
+
+class EventCreate(EventBase):
+    pass
+
+
+class EventUpdate(BaseModel):
+    """Every field optional — the console edits one row at a time, and an
+    omitted field must not blank out what is already recorded.
+
+    The cross-field date rule from `EventBase` cannot run here: a request may
+    legitimately move only the end date, and the start it has to be compared
+    against lives on the stored row. The endpoint applies it against the
+    merged result instead.
+    """
+
+    event_type: str | None = None
+    college: str | None = Field(default=None, min_length=2, max_length=150)
+    student_count: int | None = Field(default=None, ge=0, le=100_000)
+    amount_collected: float | None = Field(default=None, ge=0)
+    amount_receivable: float | None = Field(default=None, ge=0)
+    start_date: date | None = None
+    end_date: date | None = None
+    days_conducted: int | None = Field(default=None, ge=0, le=3_650)
+    notes: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("event_type")
+    @classmethod
+    def _known_event_type(cls, v: str | None) -> str | None:
+        if v is not None and v not in EVENT_TYPES:
+            raise ValueError(f"Event type must be one of {', '.join(EVENT_TYPES)}.")
+        return v
+
+    @field_validator("college")
+    @classmethod
+    def _tidy_college(cls, v: str | None) -> str | None:
+        return v.strip() if v is not None else v
+
+
+class EventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    owner_id: str
+    event_type: str
+    college: str
+    student_count: int
+    amount_collected: float
+    amount_receivable: float
+    start_date: str
+    end_date: str
+    days_conducted: int
+    notes: str | None = None
+    recorded_by_id: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class EventSummaryOut(BaseModel):
+    """What the Finance page totals across the events the caller can see."""
+
+    event_count: int
+    student_count: int
+    amount_collected: float
+    amount_receivable: float

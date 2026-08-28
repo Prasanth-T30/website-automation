@@ -131,6 +131,17 @@ export const DURATION_CHOICES = ["15 Days", "30 Days", "45 Days", "60 Days", "90
 
 export const MODE_CHOICES = ["Online", "Offline"];
 
+// How the registration fee is being paid. UPI is settled by the applicant
+// before submitting, so the form asks for the amount, the reference and a
+// screenshot. Cash is settled at the office desk afterwards, so the form asks
+// for none of them — an HR records what was actually collected.
+export const PAYMENT_METHOD_UPI = "upi";
+export const PAYMENT_METHOD_CASH = "cash";
+export const PAYMENT_METHOD_CHOICES = [
+  { value: PAYMENT_METHOD_UPI, label: "UPI" },
+  { value: PAYMENT_METHOD_CASH, label: "Cash (pay at office)" },
+];
+
 export const STATUS_COLORS = {
   Pending: "bg-amber-100 text-amber-700 border-amber-200",
   Approved: "bg-emerald-100 text-emerald-700 border-emerald-200",

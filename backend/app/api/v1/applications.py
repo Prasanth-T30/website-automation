@@ -123,17 +123,24 @@ def approve_application(
         )
 
     student = students.create_from_application(app_, total_fees=data.total_fees)
-    if app_.amount > 0:
+    if app_.amount and app_.amount > 0:
         # The registration's self-reported amount is the student's first
         # installment (confirmed with the user) — give it a real receipt so
         # it shows up in the ledger and counts toward the claiming HR's
         # revenue, instead of being silently folded into fees_paid.
+        #
+        # A cash registration arrives with no amount at all: it is settled at
+        # the desk, and the HR records that payment themselves. There is
+        # nothing to receipt here, so no receipt is written.
+        reference = (
+            f"transaction {app_.transaction_id}" if app_.transaction_id else "cash at desk"
+        )
         payments.record(
             student_id=student.id,
             owner_id=student.owner_id,
             amount=app_.amount,
-            method=None,
-            notes=f"Registration payment (transaction {app_.transaction_id})",
+            method=app_.payment_method,
+            notes=f"Registration payment ({reference})",
             recorded_by_id=user.id,
         )
 

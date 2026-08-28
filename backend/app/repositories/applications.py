@@ -132,16 +132,25 @@ class ApplicationRepository:
     def create(self, **fields) -> Application:
         """Public submission. Assigns registration_id and checks transaction_id
         uniqueness atomically."""
-        transaction_id = fields["transaction_id"].strip()
+        # A cash registration has no reference to claim. The index exists to
+        # stop one payment being counted twice, and there is no payment to
+        # point at yet — so cash simply skips it rather than reserving an
+        # empty key that every other cash registration would then collide on.
+        raw_transaction_id = fields.get("transaction_id")
+        transaction_id = raw_transaction_id.strip() if raw_transaction_id else None
         year = datetime.now(UTC).year
         counter_ref = self._db.collection(APPLICATION_COUNTERS).document(str(year))
-        tx_index_ref = self._db.collection(APPLICATION_TRANSACTIONS).document(transaction_id)
+        tx_index_ref = (
+            self._db.collection(APPLICATION_TRANSACTIONS).document(transaction_id)
+            if transaction_id
+            else None
+        )
         app_ref = self._db.collection(APPLICATIONS).document()
         now = datetime.now(UTC)
 
         @transactional
         def _create(tx: Transaction) -> str:
-            if tx_index_ref.get(transaction=tx).exists:
+            if tx_index_ref is not None and tx_index_ref.get(transaction=tx).exists:
                 raise DuplicateTransactionId(transaction_id)
 
             counter_snap = counter_ref.get(transaction=tx)
@@ -149,7 +158,8 @@ class ApplicationRepository:
             registration_id = f"REG{year}{seq:04d}"
 
             tx.set(counter_ref, {"value": seq})
-            tx.set(tx_index_ref, {"application_id": app_ref.id})
+            if tx_index_ref is not None:
+                tx.set(tx_index_ref, {"application_id": app_ref.id})
             tx.set(
                 app_ref,
                 {
@@ -222,9 +232,35 @@ class ApplicationRepository:
         return updated
 
     def mark_rejected(self, application_id: str, reason: str) -> Application:
+        """Reject an application and release its transaction id.
+
+        The id index exists to stop one payment being claimed by two
+        registrations. A rejected application claims nothing, so holding its
+        id would lock the applicant out of ever re-registering with the
+        payment they actually made — they would have to invent a fake
+        reference to get past the form, which defeats the check entirely.
+
+        The rejected row keeps its transaction_id for the paper trail; only
+        the uniqueness index entry goes, and only when it still points at
+        this application.
+        """
+        application = self.get(application_id)
         self._db.collection(APPLICATIONS).document(application_id).update(
             {"status": "rejected", "rejection_reason": reason, "updated_at": datetime.now(UTC)}
         )
+
+        if application and application.transaction_id:
+            index = self._db.collection(APPLICATION_TRANSACTIONS).document(
+                application.transaction_id.strip()
+            )
+            snapshot = index.get()
+            # Guarded: a resubmission may already own the index entry, and
+            # rejecting the older row must not free the newer one's id.
+            if snapshot.exists and (snapshot.to_dict() or {}).get(
+                "application_id"
+            ) == application_id:
+                index.delete()
+
         updated = self.get(application_id)
         assert updated is not None
         return updated

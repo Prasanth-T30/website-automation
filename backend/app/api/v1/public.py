@@ -23,6 +23,7 @@ from app.core.constants import (
     DOMAIN_CATALOG,
     DOMAIN_CHOICES,
     DURATION_CHOICES,
+    PAYMENT_METHOD_UPI,
     TITLE_CHOICES,
     YEAR_CHOICES,
     passed_out_year_choices,
@@ -77,15 +78,20 @@ async def submit_application(
     duration: str = Form(...),
     start_date: date = Form(...),
     end_date: date = Form(...),
-    amount: float = Form(...),
-    transaction_id: str = Form(...),
+    payment_method: str = Form("upi"),
+    amount: float | None = Form(None),
+    transaction_id: str | None = Form(None),
     declaration: bool = Form(...),
     mode: str | None = Form(None),
     project_topic: str | None = Form(None),
+    hr_name: str | None = Form(None),
     other: str | None = Form(None),
     native_place: str | None = Form(None),
     passed_out_year: str | None = Form(None),
-    payment_screenshot: UploadFile = File(...),
+    # Cash is settled at the desk, so there is nothing to screenshot. The
+    # schema decides which methods may omit it; this only has to accept the
+    # request that arrives without a file.
+    payment_screenshot: UploadFile | None = File(None),
 ) -> ApplicationOut:
     try:
         data = ApplicationCreate(
@@ -103,11 +109,13 @@ async def submit_application(
             duration=duration,
             start_date=start_date,
             end_date=end_date,
+            payment_method=payment_method,
             amount=amount,
             transaction_id=transaction_id,
             declaration=declaration,
             mode=mode,
             project_topic=project_topic,
+            hr_name=hr_name,
             other=other,
             native_place=native_place,
             passed_out_year=passed_out_year,
@@ -117,28 +125,39 @@ async def submit_application(
             status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors()[0]["msg"]
         ) from exc
 
-    suffix = Path(payment_screenshot.filename or "").suffix.lower()
-    if suffix not in ALLOWED_SCREENSHOT_EXTENSIONS:
-        raise HTTPException(
-            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"File type '{suffix}' not allowed. Use JPG or PNG.",
-        )
+    # A UPI registration is only checkable with the screenshot, so it stays
+    # mandatory there. Cash has none to give.
+    stored_filename = None
+    if payment_screenshot is not None and payment_screenshot.filename:
+        suffix = Path(payment_screenshot.filename).suffix.lower()
+        if suffix not in ALLOWED_SCREENSHOT_EXTENSIONS:
+            raise HTTPException(
+                status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail=f"File type '{suffix}' not allowed. Use JPG or PNG.",
+            )
 
-    content = await payment_screenshot.read()
-    if not content:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Uploaded screenshot is empty.")
-    if len(content) > MAX_SCREENSHOT_MB * 1024 * 1024:
-        raise HTTPException(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File exceeds {MAX_SCREENSHOT_MB} MB limit.",
-        )
+        content = await payment_screenshot.read()
+        if not content:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, detail="Uploaded screenshot is empty."
+            )
+        if len(content) > MAX_SCREENSHOT_MB * 1024 * 1024:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File exceeds {MAX_SCREENSHOT_MB} MB limit.",
+            )
 
-    stored_filename = f"{uuid.uuid4().hex}{suffix}"
-    storage.upload(
-        stored_filename=stored_filename,
-        content=content,
-        content_type=payment_screenshot.content_type or "image/jpeg",
-    )
+        stored_filename = f"{uuid.uuid4().hex}{suffix}"
+        storage.upload(
+            stored_filename=stored_filename,
+            content=content,
+            content_type=payment_screenshot.content_type or "image/jpeg",
+        )
+    elif data.payment_method == PAYMENT_METHOD_UPI:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="A payment screenshot is required for a UPI payment.",
+        )
 
     try:
         created = applications.create(
