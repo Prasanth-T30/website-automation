@@ -76,6 +76,7 @@ class UserRepository:
         role: UserRole,
         phone: str | None,
         must_change_password: bool,
+        designation: str | None = None,
     ) -> User:
         email = _normalize(email)
         user_ref = self._db.collection(USERS).document()
@@ -96,6 +97,7 @@ class UserRepository:
                     "role": role.value,
                     "is_active": True,
                     "phone": phone,
+                    "designation": designation,
                     "token_version": 0,
                     "must_change_password": must_change_password,
                     "last_login_at": None,

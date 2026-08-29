@@ -27,6 +27,9 @@ class User:
     role: UserRole
     is_active: bool = True
     phone: str | None = None
+    # Job title, separate from `role` above. Optional: accounts created before
+    # designations existed have none, and reading one back must not fail.
+    designation: str | None = None
 
     # Incremented to invalidate every outstanding token for this user — used by
     # password change, admin reset and deactivation. Cheaper than a session
@@ -52,6 +55,7 @@ class User:
             role=UserRole(role),
             is_active=data.get("is_active", True),
             phone=data.get("phone"),
+            designation=data.get("designation"),
             token_version=data.get("token_version", 0),
             must_change_password=data.get("must_change_password", False),
             last_login_at=data.get("last_login_at"),

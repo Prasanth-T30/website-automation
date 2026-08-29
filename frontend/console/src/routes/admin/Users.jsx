@@ -18,6 +18,24 @@ import { useAuth } from "@/features/auth/AuthProvider";
 import { usersApi } from "@/features/users/api";
 import { ApiError } from "@/lib/api";
 const USERS_KEY = ["admin", "users"];
+
+// Job titles, separate from the access role below. "Role" decides what the
+// software lets someone do (admin or HR); this records what they actually
+// are, so a Managing Director can hold admin access and a Technical Lead
+// ordinary access without the two ideas fighting.
+//
+// Kept in step with DESIGNATION_LABELS on the API, which rejects anything
+// not on this list.
+const DESIGNATIONS = [
+  { value: "executive_hr", label: "Executive HR" },
+  { value: "business_development_executive", label: "Business Development Executive" },
+  { value: "hr", label: "HR" },
+  { value: "technical_lead", label: "Technical Lead" },
+  { value: "executive_head", label: "Executive Head" },
+  { value: "managing_director", label: "Managing Director" },
+  { value: "director", label: "Director" },
+];
+const DESIGNATION_LABELS = Object.fromEntries(DESIGNATIONS.map((d) => [d.value, d.label]));
 const createSchema = z.object({
   full_name: z.string().min(2, "Enter a full name."),
   email: z.string().email("Enter a valid email address."),
@@ -26,6 +44,7 @@ const createSchema = z.object({
     .min(10, "Use at least 10 characters.")
     .refine((v) => new TextEncoder().encode(v).length <= 72, "Password is too long."),
   role: z.enum(["hr", "admin"]),
+  designation: z.enum(DESIGNATIONS.map((d) => d.value)).optional().or(z.literal("")),
   phone: z.string().optional(),
 });
 export default function Users() {
@@ -43,14 +62,19 @@ export default function Users() {
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(createSchema),
-    defaultValues: { role: "hr" },
+    defaultValues: { role: "hr", designation: "hr" },
   });
   const createUser = useMutation({
-    mutationFn: (values) => usersApi.create({ ...values, phone: values.phone || null }),
+    mutationFn: (values) =>
+      usersApi.create({
+        ...values,
+        phone: values.phone || null,
+        designation: values.designation || null,
+      }),
     onSuccess: async (created) => {
       await invalidate();
       setCreateOpen(false);
-      reset({ role: "hr" });
+      reset({ role: "hr", designation: "hr" });
       toast.success(`Account created for ${created.full_name}.`);
     },
     onError: (err) =>
@@ -120,7 +144,7 @@ export default function Users() {
               <table className="w-full min-w-[720px] text-sm">
                 <thead>
                   <tr className="border-b border-line-subtle bg-subtle/60 text-left">
-                    {["Name", "Email", "Role", "Status", "Last sign-in", ""].map((h) => (
+                    {["Name", "Email", "Designation", "Access", "Status", "Last sign-in", ""].map((h) => (
                       <th
                         key={h}
                         className="px-4 py-2.5 text-xs font-bold tracking-wide text-fg-muted uppercase"
@@ -143,6 +167,9 @@ export default function Users() {
                           </div>
                         </td>
                         <td className="px-4 py-3 text-fg-secondary">{u.email}</td>
+                        <td className="px-4 py-3 text-sm text-fg-secondary">
+                          {DESIGNATION_LABELS[u.designation] ?? "—"}
+                        </td>
                         <td className="px-4 py-3">
                           <Badge tone={u.role === "admin" ? "brand" : "neutral"}>
                             {u.role === "admin" ? "Administrator" : "HR"}
@@ -221,13 +248,34 @@ export default function Users() {
           <Field label="Phone" error={errors.phone?.message}>
             <Input type="tel" {...register("phone")} />
           </Field>
-          <Field label="Role" error={errors.role?.message} required>
+          <Field
+            label="Access level"
+            error={errors.role?.message}
+            hint="What the console lets them do."
+            required
+          >
             <select
               className="h-10 w-full rounded-md border border-line bg-surface px-3 text-sm text-fg"
               {...register("role")}
             >
               <option value="hr">HR</option>
               <option value="admin">Administrator</option>
+            </select>
+          </Field>
+          <Field
+            label="Designation"
+            error={errors.designation?.message}
+            hint="Their job title. Does not affect what they can access."
+          >
+            <select
+              className="h-10 w-full rounded-md border border-line bg-surface px-3 text-sm text-fg"
+              {...register("designation")}
+            >
+              {DESIGNATIONS.map((d) => (
+                <option key={d.value} value={d.value}>
+                  {d.label}
+                </option>
+              ))}
             </select>
           </Field>
           <Field

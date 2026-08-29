@@ -187,6 +187,24 @@ MODE_CHOICES = ["Online", "Offline"]
 # How a registration was paid for. UPI is settled by the applicant before they
 # submit, so it arrives with an amount and a reference; cash is settled at the
 # desk, so the amount is entered by an HR afterwards and there is no reference.
+# Job titles. Distinct from `UserRole`, which is the access level (admin or
+# hr) that every permission check reads: these say what a person does, not
+# what the software lets them do. A Managing Director may hold admin access
+# and a Technical Lead ordinary access without the two ideas interfering.
+#
+# Stored as the key; the label is what the console shows.
+DESIGNATION_LABELS: dict[str, str] = {
+    "executive_hr": "Executive HR",
+    "business_development_executive": "Business Development Executive",
+    "hr": "HR",
+    "technical_lead": "Technical Lead",
+    "executive_head": "Executive Head",
+    "managing_director": "Managing Director",
+    "director": "Director",
+}
+DESIGNATIONS = list(DESIGNATION_LABELS)
+
+
 PAYMENT_METHOD_UPI = "upi"
 PAYMENT_METHOD_CASH = "cash"
 PAYMENT_METHODS = [PAYMENT_METHOD_UPI, PAYMENT_METHOD_CASH]

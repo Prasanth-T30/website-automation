@@ -12,6 +12,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, status
 
 from app.api.deps import ActivityRepo, AdminUser, StudentRepo, UserRepo
+from app.core.constants import DESIGNATION_LABELS
 from app.core.security import generate_password, hash_password
 from app.models.user import User, UserRole
 from app.repositories.users import EmailAlreadyExists
@@ -33,6 +34,16 @@ def list_users(users: UserRepo, _: AdminUser) -> list[UserOut]:
     return [UserOut.model_validate(u) for u in users.list_all()]
 
 
+@router.get("/designations", response_model=dict[str, str])
+def designations(_: AdminUser) -> dict[str, str]:
+    """Job titles a user can be given, key to display label.
+
+    Served rather than hard-coded in the console so the two cannot drift —
+    a title the API would reject must never appear in the dropdown.
+    """
+    return DESIGNATION_LABELS
+
+
 @router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def create_user(
     data: UserCreate, users: UserRepo, activity_repo: ActivityRepo, admin: AdminUser
@@ -43,6 +54,7 @@ def create_user(
             full_name=data.full_name.strip(),
             password_hash=hash_password(data.password),
             role=data.role,
+            designation=data.designation,
             phone=data.phone,
             must_change_password=data.must_change_password,
         )

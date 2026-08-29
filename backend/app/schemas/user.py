@@ -6,6 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.core.constants import DESIGNATIONS
 from app.core.security import BCRYPT_MAX_BYTES
 from app.models.user import UserRole
 
@@ -56,6 +57,7 @@ class UserOut(BaseModel):
     email: EmailStr
     full_name: str
     role: UserRole
+    designation: str | None = None
     is_active: bool
     phone: str | None = None
     must_change_password: bool
@@ -75,12 +77,27 @@ class SessionOut(BaseModel):
 # ── Admin user management ────────────────────────────────────────────────────
 
 
+def _check_designation(v: str | None) -> str | None:
+    """Blank means "not recorded", which is allowed; a wrong one is not."""
+    if v is None or v == "":
+        return None
+    if v not in DESIGNATIONS:
+        raise ValueError(f"Designation must be one of {', '.join(DESIGNATIONS)}.")
+    return v
+
+
 class UserCreate(Password):
     email: EmailStr
     full_name: str = Field(min_length=2, max_length=150)
     role: UserRole = UserRole.hr
+    designation: str | None = None
     phone: str | None = Field(default=None, max_length=20)
     password: str
+
+    @field_validator("designation")
+    @classmethod
+    def _valid_designation(cls, v: str | None) -> str | None:
+        return _check_designation(v)
     # Force a change on first login when an admin sets the initial password.
     must_change_password: bool = True
 
@@ -88,8 +105,14 @@ class UserCreate(Password):
 class UserUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=150)
     role: UserRole | None = None
+    designation: str | None = None
     phone: str | None = Field(default=None, max_length=20)
     is_active: bool | None = None
+
+    @field_validator("designation")
+    @classmethod
+    def _valid_designation(cls, v: str | None) -> str | None:
+        return _check_designation(v)
 
 
 class PasswordResetOut(BaseModel):
