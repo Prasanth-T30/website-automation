@@ -127,6 +127,17 @@ services:
       # /api/v1/automation/run as well.
       - key: AUTOMATION_ENABLED
         value: "false"
+      # Whether this process runs the daily job on a timer of its own, at
+      # 09:00 Asia/Kolkata. Both this and AUTOMATION_ENABLED must be true.
+      # Two flags rather than one because `.env` ships with automation on and
+      # the test suite reads it — a single flag would start the timer inside
+      # every test run.
+      #
+      # Set this on the web service only, never on the cron service below, or
+      # the run happens twice. (Harmless — an already-filed document is never
+      # reissued — but it doubles the work for nothing.)
+      - key: AUTOMATION_SCHEDULER_ENABLED
+        value: "false"
       - key: AUTOMATION_MAX_PER_RUN
         value: "25"
       - key: AUTOMATION_TOKEN

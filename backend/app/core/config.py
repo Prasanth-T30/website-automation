@@ -111,6 +111,13 @@ class Settings(BaseSettings):
     automation_enabled: bool = False
     # A run will not send more than this. A bad query or a bulk import cannot
     # become hundreds of emails before anyone notices.
+    # Whether this process runs the daily document job on a timer of its own.
+    #
+    # Separate from `automation_enabled`, and off by default, because `.env`
+    # ships with automation on and the test suite reads `.env`: a scheduler
+    # keyed to that flag alone would start during every test run and mail real
+    # students. Set this only on a deployed host.
+    automation_scheduler_enabled: bool = False
     automation_max_per_run: int = 25
     # Shared secret for the scheduler that calls the run endpoint. Without one
     # set, only a signed-in admin can trigger a run.

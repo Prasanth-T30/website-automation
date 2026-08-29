@@ -6,6 +6,8 @@ Prod:  uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
@@ -16,6 +18,7 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.csrf import CsrfMiddleware
 from app.core.ratelimit import limiter
+from app.services import scheduler
 
 
 def _rate_limit_handler(request, exc: RateLimitExceeded):  # type: ignore[no-untyped-def]
@@ -25,8 +28,19 @@ def _rate_limit_handler(request, exc: RateLimitExceeded):  # type: ignore[no-unt
     )
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Own the daily document timer for as long as the process is serving."""
+    scheduler.start(app)
+    try:
+        yield
+    finally:
+        await scheduler.stop(app)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
+        lifespan=_lifespan,
         title=settings.app_name,
         version=settings.app_version,
         description="Multi-user HRM for DVein Innovations.",
