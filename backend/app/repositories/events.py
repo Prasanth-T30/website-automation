@@ -17,7 +17,11 @@ from datetime import UTC, datetime
 from google.cloud.firestore import Client, FieldFilter
 
 from app.models.event import Event
-from app.models.event_attendee import EventAttendee
+from app.models.event_attendee import (
+    EventAttendanceMark,
+    EventAttendee,
+    event_attendance_doc_id,
+)
 
 EVENTS = "events"
 
@@ -147,3 +151,78 @@ class EventAttendeeRepository:
             batch.commit()
             removed += len(docs)
         return removed
+
+
+EVENT_ATTENDANCE = "event_attendance"
+EVENT_ATTENDANCE_STATUSES = ("present", "absent")
+
+
+class EventAttendanceRepository:
+    """Day-by-day attendance for a workshop or bootcamp roster."""
+
+    def __init__(self, db: Client):
+        self._db = db
+
+    def list_for(self, event_id: str, *, date: str | None = None) -> list[EventAttendanceMark]:
+        query = self._db.collection(EVENT_ATTENDANCE).where(
+            filter=FieldFilter("event_id", "==", event_id)
+        )
+        rows = [EventAttendanceMark.from_doc(d.id, d.to_dict()) for d in query.stream()]
+        if date:
+            rows = [r for r in rows if r.date == date]
+        return rows
+
+    def mark_many(
+        self, *, event_id: str, owner_id: str, date: str, marks: dict[str, str]
+    ) -> int:
+        """Set the whole day at once, keyed on attendee id -> status.
+
+        Idempotent by construction: the document id is derived from the
+        attendee and the date, so re-marking a day corrects it rather than
+        adding a second, contradictory row.
+        """
+        now = datetime.now(UTC)
+        written = 0
+        items = list(marks.items())
+        for start in range(0, len(items), 400):
+            batch = self._db.batch()
+            for attendee_id, status in items[start : start + 400]:
+                ref = self._db.collection(EVENT_ATTENDANCE).document(
+                    event_attendance_doc_id(attendee_id, date)
+                )
+                batch.set(ref, {
+                    "event_id": event_id, "attendee_id": attendee_id,
+                    "owner_id": owner_id, "date": date, "status": status,
+                    "created_at": now, "updated_at": now,
+                })
+                written += 1
+            batch.commit()
+        return written
+
+    def delete_for(self, event_id: str) -> int:
+        """Clear an event's attendance — used when the event or its roster
+        goes, so marks are not left pointing at people who no longer exist."""
+        removed = 0
+        for _ in range(25):
+            docs = list(
+                self._db.collection(EVENT_ATTENDANCE)
+                .where(filter=FieldFilter("event_id", "==", event_id))
+                .limit(400)
+                .stream()
+            )
+            if not docs:
+                break
+            batch = self._db.batch()
+            for doc in docs:
+                batch.delete(doc.reference)
+            batch.commit()
+            removed += len(docs)
+        return removed
+
+    def delete_for_attendee(self, attendee_id: str) -> None:
+        for doc in (
+            self._db.collection(EVENT_ATTENDANCE)
+            .where(filter=FieldFilter("attendee_id", "==", attendee_id))
+            .stream()
+        ):
+            doc.reference.delete()

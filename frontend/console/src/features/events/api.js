@@ -31,4 +31,11 @@ export const eventsApi = {
   // A blank register in the shape the importer reads. Served by the API
   // rather than built here, so it cannot drift from the parser.
   templateUrl: () => api.url("/events/attendees/template.xlsx"),
+
+  // The register. Days come from the event's own dates, so a slip of the
+  // picker cannot file attendance against a day it did not run.
+  days: (id) => api.get(`/events/${id}/days`),
+  attendance: (id, day) => api.get(`/events/${id}/attendance`, { day }),
+  markAttendance: (id, day, marks) =>
+    api.post(`/events/${id}/attendance`, { date: day, marks }),
 };

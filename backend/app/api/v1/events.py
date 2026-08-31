@@ -15,15 +15,24 @@ individual events.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile, status
 
-from app.api.deps import ActiveUser, ActivityRepo, EventAttendeeRepo, EventRepo
+from app.api.deps import (
+    ActiveUser,
+    ActivityRepo,
+    EventAttendanceRepo,
+    EventAttendeeRepo,
+    EventRepo,
+)
 from app.core.constants import EVENT_TYPE_LABELS, EVENT_TYPES
 from app.models.event import Event
 from app.schemas.event import (
     AttendeeImportOut,
+    EventAttendanceDayOut,
+    EventAttendanceIn,
+    EventAttendanceOut,
     EventAttendeeOut,
     EventCreate,
     EventOut,
@@ -161,14 +170,16 @@ def delete_event(
     event_id: str,
     events: EventRepo,
     attendees: EventAttendeeRepo,
+    attendance: EventAttendanceRepo,
     activity_repo: ActivityRepo,
     user: ActiveUser,
 ) -> None:
     """Deleting removes the event's money from the HR's total, so it is
     recorded — the report changing shape needs an explanation behind it."""
     existing = _mine_or_404(events, event_id, user)
-    # The roster goes with it. Left behind, those rows would sit in the
-    # collection belonging to an event nobody can reach.
+    # The roster and its register go with it. Left behind, those rows would
+    # sit in their collections belonging to an event nobody can reach.
+    attendance.delete_for(event_id)
     attendees.delete_for(event_id)
     events.delete(event_id)
     activity.record(
@@ -278,6 +289,7 @@ def remove_attendee(
     attendee_id: str,
     events: EventRepo,
     attendees: EventAttendeeRepo,
+    attendance: EventAttendanceRepo,
     user: ActiveUser,
 ) -> None:
     _mine_or_404(events, event_id, user)
@@ -287,6 +299,7 @@ def remove_attendee(
     # happen to own.
     if person is None or person.event_id != event_id or person.owner_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Attendee not found.")
+    attendance.delete_for_attendee(attendee_id)
     attendees.delete(attendee_id)
 
 
@@ -295,11 +308,13 @@ def clear_roster(
     event_id: str,
     events: EventRepo,
     attendees: EventAttendeeRepo,
+    attendance: EventAttendanceRepo,
     activity_repo: ActivityRepo,
     user: ActiveUser,
 ) -> None:
     """Empty the roster, for re-importing a corrected file."""
     event = _mine_or_404(events, event_id, user)
+    attendance.delete_for(event_id)
     removed = attendees.delete_for(event_id)
     activity.record(
         activity_repo,
@@ -309,4 +324,104 @@ def clear_roster(
         entity_id=event_id,
         summary=f"Cleared {removed} attendees from {event.college}",
         meta={"removed": removed},
+    )
+
+
+# ── Attendance for a roster ──────────────────────────────────────────────
+
+
+def _event_days(event) -> list[str]:
+    """The dates a workshop actually ran, from its own start and end.
+
+    Attendance is only accepted on these, so a slip of the date picker cannot
+    file a register against a day the event was not running.
+    """
+    start = date.fromisoformat(event.start_date)
+    end = date.fromisoformat(event.end_date)
+    span = (end - start).days
+    return [(start + timedelta(days=offset)).isoformat() for offset in range(span + 1)]
+
+
+@router.get("/{event_id}/days", response_model=list[str])
+def event_days(event_id: str, events: EventRepo, user: ActiveUser) -> list[str]:
+    """Which dates this event's register can be marked against."""
+    return _event_days(_mine_or_404(events, event_id, user))
+
+
+@router.get("/{event_id}/attendance", response_model=EventAttendanceDayOut)
+def read_attendance(
+    event_id: str,
+    events: EventRepo,
+    attendees: EventAttendeeRepo,
+    attendance: EventAttendanceRepo,
+    user: ActiveUser,
+    day: str = Query(..., description="ISO date, one of the event's own days"),
+) -> EventAttendanceDayOut:
+    event = _mine_or_404(events, event_id, user)
+    if day not in _event_days(event):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="That date is outside the event's own dates.",
+        )
+
+    marks = attendance.list_for(event_id, date=day)
+    present = sum(1 for m in marks if m.status == "present")
+    # Counted against the roster, not against the marks: someone added after
+    # a day was marked is unmarked for that day, and the register should say
+    # so rather than quietly reading as complete.
+    roster_size = attendees.count_for(event_id)
+    return EventAttendanceDayOut(
+        date=day,
+        present=present,
+        absent=len(marks) - present,
+        unmarked=max(roster_size - len(marks), 0),
+        marks=[EventAttendanceOut.model_validate(m) for m in marks],
+    )
+
+
+@router.post("/{event_id}/attendance", response_model=EventAttendanceDayOut)
+def mark_attendance(
+    event_id: str,
+    data: EventAttendanceIn,
+    events: EventRepo,
+    attendees: EventAttendeeRepo,
+    attendance: EventAttendanceRepo,
+    activity_repo: ActivityRepo,
+    user: ActiveUser,
+) -> EventAttendanceDayOut:
+    """Mark one day of the register."""
+    event = _mine_or_404(events, event_id, user)
+    day = data.date.isoformat()
+    if day not in _event_days(event):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="That date is outside the event's own dates.",
+        )
+
+    # Only people actually on this roster. Without this an attendee id from
+    # another event could be marked through an event you own.
+    on_roster = {a.id for a in attendees.list_for(event_id)}
+    unknown = [m.attendee_id for m in data.marks if m.attendee_id not in on_roster]
+    if unknown:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"{len(unknown)} of those people are not on this roster.",
+        )
+
+    attendance.mark_many(
+        event_id=event_id, owner_id=user.id, date=day,
+        marks={m.attendee_id: m.status for m in data.marks},
+    )
+    activity.record(
+        activity_repo,
+        action="event.attendance_marked",
+        actor_id=user.id,
+        entity_type="event",
+        entity_id=event_id,
+        summary=f"Marked attendance for {event.college} on {day}",
+        meta={"date": day, "marked": len(data.marks)},
+    )
+    return read_attendance(
+        event_id=event_id, events=events, attendees=attendees,
+        attendance=attendance, user=user, day=day,
     )

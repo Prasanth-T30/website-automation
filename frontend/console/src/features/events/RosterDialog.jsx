@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/States";
+import { AttendancePanel } from "@/features/events/AttendancePanel";
 import { eventsApi } from "@/features/events/api";
 import { ApiError } from "@/lib/api";
 
@@ -21,6 +22,7 @@ export function RosterDialog({ event, open, onOpenChange }) {
   const queryClient = useQueryClient();
   const fileInput = useRef(null);
   const [lastImport, setLastImport] = useState(null);
+  const [tab, setTab] = useState("roster");
 
   const roster = useQuery({
     queryKey: ["events", event?.id, "attendees"],
@@ -71,7 +73,10 @@ export function RosterDialog({ event, open, onOpenChange }) {
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) setLastImport(null);
+        if (!next) {
+          setLastImport(null);
+          setTab("roster");
+        }
         onOpenChange(next);
       }}
       title={event ? `Attendees — ${event.college}` : "Attendees"}
@@ -101,6 +106,30 @@ export function RosterDialog({ event, open, onOpenChange }) {
       }
     >
       <div className="flex flex-col gap-4">
+        <div className="flex gap-1 rounded-md bg-subtle p-1">
+          {[
+            ["roster", `Attendees${people.length ? ` (${people.length})` : ""}`],
+            ["attendance", "Attendance"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setTab(value)}
+              className={`h-8 flex-1 rounded text-xs font-semibold transition-colors ${
+                tab === value
+                  ? "bg-surface text-fg shadow-e1"
+                  : "text-fg-muted hover:text-fg"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "attendance" && <AttendancePanel event={event} people={people} />}
+
+        {tab === "roster" && (
+          <>
         <div className="rounded-md border border-dashed border-line bg-subtle p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -212,6 +241,8 @@ export function RosterDialog({ event, open, onOpenChange }) {
               </tbody>
             </table>
           </div>
+        )}
+          </>
         )}
       </div>
     </Dialog>

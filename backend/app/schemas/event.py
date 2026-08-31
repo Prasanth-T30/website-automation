@@ -130,3 +130,45 @@ class AttendeeImportOut(BaseModel):
     # One line per row that could not be used, so a partial import can be
     # corrected rather than guessed at.
     skipped: list[str] = []
+
+
+class EventAttendanceMarkIn(BaseModel):
+    attendee_id: str
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def _known_status(cls, v: str) -> str:
+        if v not in ("present", "absent"):
+            raise ValueError("Status must be present or absent.")
+        return v
+
+
+class EventAttendanceIn(BaseModel):
+    """One day of a workshop, marked in one request.
+
+    The whole day at once rather than a call per attendee: a register is
+    marked in one sitting, and sixty round trips would make the screen feel
+    broken on a college's wifi.
+    """
+
+    date: date
+    marks: list[EventAttendanceMarkIn] = Field(min_length=1, max_length=2000)
+
+
+class EventAttendanceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    attendee_id: str
+    date: str
+    status: str
+
+
+class EventAttendanceDayOut(BaseModel):
+    """What the console needs to draw one day's register."""
+
+    date: str
+    present: int
+    absent: int
+    unmarked: int
+    marks: list[EventAttendanceOut]

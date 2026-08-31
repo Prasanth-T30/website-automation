@@ -46,3 +46,42 @@ class EventAttendee:
             year=data.get("year"),
             created_at=data.get("created_at"),
         )
+
+
+def event_attendance_doc_id(attendee_id: str, date_iso: str) -> str:
+    """Deterministic, so marking the same person on the same day twice is a
+    plain idempotent `.set()` — the same trick batch attendance uses, and the
+    reason a double-tap on a phone cannot create two conflicting marks."""
+    return f"{attendee_id}__{date_iso}"
+
+
+@dataclass
+class EventAttendanceMark:
+    """One attendee, one day of a workshop or bootcamp.
+
+    Separate from `AttendanceRecord`, which is keyed on a student and a batch.
+    An event attendee is neither, so reusing that collection would mean rows
+    with a null student in the register every batch screen reads from.
+    """
+
+    id: str
+    event_id: str
+    attendee_id: str
+    owner_id: str
+    date: str  # ISO date string
+    status: str = "present"  # present | absent
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @staticmethod
+    def from_doc(doc_id: str, data: dict) -> EventAttendanceMark:
+        return EventAttendanceMark(
+            id=doc_id,
+            event_id=data["event_id"],
+            attendee_id=data["attendee_id"],
+            owner_id=data["owner_id"],
+            date=data["date"],
+            status=data.get("status", "present"),
+            created_at=data.get("created_at"),
+            updated_at=data.get("updated_at"),
+        )
