@@ -6,6 +6,7 @@ Prod:  uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -28,9 +29,30 @@ def _rate_limit_handler(request, exc: RateLimitExceeded):  # type: ignore[no-unt
     )
 
 
+def _configure_logging() -> None:
+    """Make the application's own logs reach stdout.
+
+    Uvicorn configures its own loggers and leaves everyone else's alone, so
+    `logger.info` from `app.*` had no handler and went nowhere. On a host that
+    is only observable through its logs that is worse than quiet: the daily
+    document run reports what it sent, and its failure handler reports what
+    went wrong, and neither was reaching Cloud Run's log viewer.
+
+    Only touched if nothing has configured the root logger already, so a host
+    or test harness with its own setup keeps it.
+    """
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Own the daily document timer for as long as the process is serving."""
+    _configure_logging()
     scheduler.start(app)
     try:
         yield

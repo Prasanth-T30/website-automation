@@ -84,7 +84,11 @@ export default function Applications() {
     queryKey: ["students", "offer-candidates"],
     queryFn: studentsApi.offerCandidates,
     enabled: (applications.data ?? []).some((a) => a.status === "approved"),
-    staleTime: 60_000,
+    // Follows the queue rather than lagging it: an HR who issues a letter
+    // from Documents should see this screen agree within seconds.
+    staleTime: 0,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
   });
   const issuedFor = new Set(
     (offerCandidates.data ?? []).filter((c) => c.already_issued).map((c) => c.id),

@@ -121,11 +121,17 @@ function useGroupCounts(group, isAdmin) {
     enabled: wants("batches"),
     staleTime,
   });
+  // The one count that has to keep up with the table it labels. The shared
+  // pool changes under everyone: a colleague claiming a registration should
+  // drop the badge within seconds, not leave it advertising work that is
+  // already taken for the next minute.
   const applications = useQuery({
     queryKey: ["applications"],
     queryFn: () => applicationsApi.list(),
     enabled: wants("applications"),
-    staleTime,
+    staleTime: 0,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
   });
   const payments = useQuery({
     queryKey: ["payments", { mine: !isAdmin }],
