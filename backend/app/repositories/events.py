@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from google.cloud.firestore import Client, FieldFilter
 
 from app.models.event import Event
+from app.models.event_attendee import EventAttendee
 
 EVENTS = "events"
 
@@ -73,3 +74,76 @@ class EventRepository:
 
     def delete(self, event_id: str) -> None:
         self._db.collection(EVENTS).document(event_id).delete()
+
+
+EVENT_ATTENDEES = "event_attendees"
+
+
+class EventAttendeeRepository:
+    """The roster for one event.
+
+    Kept apart from `students` on purpose — see `app/models/event_attendee.py`.
+    Every read is scoped by `event_id`, and the endpoint checks the event
+    belongs to the caller before it gets here.
+    """
+
+    def __init__(self, db: Client):
+        self._db = db
+
+    def list_for(self, event_id: str) -> list[EventAttendee]:
+        query = self._db.collection(EVENT_ATTENDEES).where(
+            filter=FieldFilter("event_id", "==", event_id)
+        )
+        rows = [EventAttendee.from_doc(d.id, d.to_dict()) for d in query.stream()]
+        # Alphabetical: a roster is read to find a person, not to see who was
+        # typed in first.
+        return sorted(rows, key=lambda a: a.name.lower())
+
+    def count_for(self, event_id: str) -> int:
+        return len(self.list_for(event_id))
+
+    def add_many(self, *, event_id: str, owner_id: str, people: list[dict]) -> int:
+        """Write a whole roster.
+
+        Batched because a register is hundreds of rows and one write each
+        would take minutes. Firestore caps a batch at 500 operations.
+        """
+        now = datetime.now(UTC)
+        written = 0
+        for start in range(0, len(people), 400):
+            batch = self._db.batch()
+            for person in people[start : start + 400]:
+                ref = self._db.collection(EVENT_ATTENDEES).document()
+                batch.set(ref, {**person, "event_id": event_id,
+                                "owner_id": owner_id, "created_at": now})
+                written += 1
+            batch.commit()
+        return written
+
+    def get(self, attendee_id: str) -> EventAttendee | None:
+        snap = self._db.collection(EVENT_ATTENDEES).document(attendee_id).get()
+        return EventAttendee.from_doc(snap.id, snap.to_dict()) if snap.exists else None
+
+    def delete(self, attendee_id: str) -> None:
+        self._db.collection(EVENT_ATTENDEES).document(attendee_id).delete()
+
+    def delete_for(self, event_id: str) -> int:
+        """Clear a roster — used when the event itself is deleted, so a
+        deleted event does not leave its attendees orphaned in the
+        collection with no owner to reach them."""
+        removed = 0
+        for _ in range(25):  # bounded: 25 batches of 400 covers any real roster
+            docs = list(
+                self._db.collection(EVENT_ATTENDEES)
+                .where(filter=FieldFilter("event_id", "==", event_id))
+                .limit(400)
+                .stream()
+            )
+            if not docs:
+                break
+            batch = self._db.batch()
+            for doc in docs:
+                batch.delete(doc.reference)
+            batch.commit()
+            removed += len(docs)
+        return removed

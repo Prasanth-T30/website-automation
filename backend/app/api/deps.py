@@ -15,7 +15,7 @@ from app.repositories.announcements import AnnouncementRepository
 from app.repositories.applications import ApplicationRepository
 from app.repositories.attendance import AttendanceRepository
 from app.repositories.batches import BatchRepository
-from app.repositories.events import EventRepository
+from app.repositories.events import EventAttendeeRepository, EventRepository
 from app.repositories.payments import PaymentRepository
 from app.repositories.reports import ReportRepository
 from app.repositories.settings import SettingsRepository
@@ -60,6 +60,10 @@ def get_event_repo() -> EventRepository:
     return EventRepository(get_firestore())
 
 
+def get_event_attendee_repo() -> EventAttendeeRepository:
+    return EventAttendeeRepository(get_firestore())
+
+
 def get_report_repo() -> ReportRepository:
     return ReportRepository(get_firestore())
 
@@ -81,6 +85,9 @@ BatchRepo = Annotated[BatchRepository, Depends(get_batch_repo)]
 AttendanceRepo = Annotated[AttendanceRepository, Depends(get_attendance_repo)]
 PaymentRepo = Annotated[PaymentRepository, Depends(get_payment_repo)]
 EventRepo = Annotated[EventRepository, Depends(get_event_repo)]
+EventAttendeeRepo = Annotated[
+    EventAttendeeRepository, Depends(get_event_attendee_repo)
+]
 ReportRepo = Annotated[ReportRepository, Depends(get_report_repo)]
 SettingsRepo = Annotated[SettingsRepository, Depends(get_settings_repo)]
 Storage = Annotated[StorageService, Depends(get_storage_service)]

@@ -102,3 +102,31 @@ class EventSummaryOut(BaseModel):
     student_count: int
     amount_collected: float
     amount_receivable: float
+
+
+class EventAttendeeOut(BaseModel):
+    """One person on an event's roster.
+
+    Separate from anything under `students` — an attendee is not an enrolment.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    event_id: str
+    name: str
+    email: str | None = None
+    phone: str | None = None
+    department: str | None = None
+    year: str | None = None
+    created_at: datetime | None = None
+
+
+class AttendeeImportOut(BaseModel):
+    """What one upload did, in the terms the HR who uploaded it cares about."""
+
+    imported: int
+    total_on_roster: int
+    # One line per row that could not be used, so a partial import can be
+    # corrected rather than guessed at.
+    skipped: list[str] = []

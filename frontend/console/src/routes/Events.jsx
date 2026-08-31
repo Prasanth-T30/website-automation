@@ -7,6 +7,7 @@ import {
   Pencil,
   Plus,
   Trash2,
+  Users,
   Wallet,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -20,6 +21,7 @@ import { Field } from "@/components/ui/Field";
 import { Input } from "@/components/ui/Input";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/States";
 import { eventsApi } from "@/features/events/api";
+import { RosterDialog } from "@/features/events/RosterDialog";
 import { money, shortDate } from "@/lib/format";
 
 /**
@@ -42,6 +44,10 @@ const EVENT_TYPES = [
 ];
 
 const LABELS = Object.fromEntries(EVENT_TYPES.map((t) => [t.value, t.label]));
+
+// Which events carry a named register. Workshops and bootcamps are attended
+// by a list of students the college sends; the rest are booked as a block.
+const ROSTER_KINDS = new Set(["workshop", "bootcamp"]);
 
 // `Input` here is a bare <input>, so a dropdown is a real <select> carrying
 // the same shape by hand — the same thing the filter bars on Payments do.
@@ -218,7 +224,7 @@ function EventDialog({ open, onOpenChange, initial, onSubmit, saving }) {
   );
 }
 
-function EventRow({ event, onEdit, onDelete }) {
+function EventRow({ event, onEdit, onDelete, onRoster }) {
   return (
     <div className="flex flex-wrap items-center gap-3 border-t border-line-subtle px-4 py-3 first:border-t-0">
       <div className="min-w-[12rem] flex-1">
@@ -251,6 +257,19 @@ function EventRow({ event, onEdit, onDelete }) {
       </div>
 
       <div className="flex items-center gap-1">
+        {/* Only the two kinds of event that bring a register with them. A
+            training programme or an industrial visit is booked as a block,
+            not attended by a named list. */}
+        {ROSTER_KINDS.has(event.event_type) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onRoster(event)}
+            aria-label={`Attendees for ${event.college}`}
+          >
+            <Users className="size-4" aria-hidden />
+          </Button>
+        )}
         <Button variant="ghost" size="sm" onClick={() => onEdit(event)} aria-label="Edit event">
           <Pencil className="size-4" aria-hidden />
         </Button>
@@ -271,6 +290,7 @@ export default function Events() {
   const queryClient = useQueryClient();
   const [dialogFor, setDialogFor] = useState(null); // null | {} | event
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [rosterFor, setRosterFor] = useState(null);
 
   const list = useQuery({ queryKey: ["events"], queryFn: () => eventsApi.list() });
   const summary = useQuery({ queryKey: ["events", "summary"], queryFn: eventsApi.summary });
@@ -397,6 +417,7 @@ export default function Events() {
                         event={event}
                         onEdit={setDialogFor}
                         onDelete={setConfirmDelete}
+                        onRoster={setRosterFor}
                       />
                     ))}
                   </Card>
@@ -405,6 +426,12 @@ export default function Events() {
             })}
         </div>
       )}
+
+      <RosterDialog
+        event={rosterFor}
+        open={rosterFor !== null}
+        onOpenChange={(next) => !next && setRosterFor(null)}
+      />
 
       <EventDialog
         open={dialogFor !== null}

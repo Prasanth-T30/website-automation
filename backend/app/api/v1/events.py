@@ -17,13 +17,20 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile, status
 
-from app.api.deps import ActiveUser, ActivityRepo, EventRepo
+from app.api.deps import ActiveUser, ActivityRepo, EventAttendeeRepo, EventRepo
 from app.core.constants import EVENT_TYPE_LABELS, EVENT_TYPES
 from app.models.event import Event
-from app.schemas.event import EventCreate, EventOut, EventSummaryOut, EventUpdate
-from app.services import activity
+from app.schemas.event import (
+    AttendeeImportOut,
+    EventAttendeeOut,
+    EventCreate,
+    EventOut,
+    EventSummaryOut,
+    EventUpdate,
+)
+from app.services import activity, attendee_import
 
 router = APIRouter(prefix="/events", tags=["Events"])
 
@@ -153,12 +160,16 @@ def update_event(
 def delete_event(
     event_id: str,
     events: EventRepo,
+    attendees: EventAttendeeRepo,
     activity_repo: ActivityRepo,
     user: ActiveUser,
 ) -> None:
     """Deleting removes the event's money from the HR's total, so it is
     recorded — the report changing shape needs an explanation behind it."""
     existing = _mine_or_404(events, event_id, user)
+    # The roster goes with it. Left behind, those rows would sit in the
+    # collection belonging to an event nobody can reach.
+    attendees.delete_for(event_id)
     events.delete(event_id)
     activity.record(
         activity_repo,
@@ -170,4 +181,132 @@ def delete_event(
             f"Deleted {EVENT_TYPE_LABELS[existing.event_type]} at {existing.college}"
         ),
         meta={"amount_collected": existing.amount_collected},
+    )
+
+
+# ── The roster for a workshop or bootcamp ────────────────────────────────
+# Kept in its own collection rather than under `students`: an attendee is not
+# an enrolment, and importing sixty of them as students would distort the
+# Students page, the fee ledger and every dashboard count that reads it.
+
+MAX_ROSTER_MB = 5
+
+
+@router.get("/attendees/template.xlsx")
+def attendee_template(_: ActiveUser) -> Response:
+    """A blank register in the shape the importer reads.
+
+    Declared before the `/{event_id}/...` routes so "attendees" is not
+    matched as an event id.
+    """
+    return Response(
+        content=attendee_import.build_template(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="dvein-attendee-template.xlsx"'
+        },
+    )
+
+
+@router.get("/{event_id}/attendees", response_model=list[EventAttendeeOut])
+def list_attendees(
+    event_id: str,
+    events: EventRepo,
+    attendees: EventAttendeeRepo,
+    user: ActiveUser,
+) -> list[EventAttendeeOut]:
+    _mine_or_404(events, event_id, user)
+    return [EventAttendeeOut.model_validate(a) for a in attendees.list_for(event_id)]
+
+
+@router.post("/{event_id}/attendees/import", response_model=AttendeeImportOut)
+async def import_attendees(
+    event_id: str,
+    events: EventRepo,
+    attendees: EventAttendeeRepo,
+    activity_repo: ActivityRepo,
+    user: ActiveUser,
+    file: UploadFile = File(...),
+) -> AttendeeImportOut:
+    """Add a roster from a spreadsheet the college sent.
+
+    Adds to whatever is already there rather than replacing it — a college
+    often sends its register in parts, and silently discarding the first
+    upload when the second arrives would lose data with no warning. Use the
+    clear endpoint to start over deliberately.
+    """
+    event = _mine_or_404(events, event_id, user)
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="That file is empty.")
+    if len(content) > MAX_ROSTER_MB * 1024 * 1024:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File exceeds {MAX_ROSTER_MB} MB.",
+        )
+
+    try:
+        parsed = attendee_import.parse(content, file.filename or "")
+    except attendee_import.ImportError_ as exc:
+        # The uploader can fix their file; say what is wrong with it rather
+        # than returning a generic 400.
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    added = attendees.add_many(
+        event_id=event_id, owner_id=user.id, people=parsed.attendees
+    )
+    total = attendees.count_for(event_id)
+
+    activity.record(
+        activity_repo,
+        action="event.attendees_imported",
+        actor_id=user.id,
+        entity_type="event",
+        entity_id=event_id,
+        summary=f"Imported {added} attendees for {event.college}",
+        meta={"added": added, "skipped": len(parsed.skipped)},
+    )
+    return AttendeeImportOut(
+        imported=added, total_on_roster=total, skipped=parsed.skipped
+    )
+
+
+@router.delete("/{event_id}/attendees/{attendee_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_attendee(
+    event_id: str,
+    attendee_id: str,
+    events: EventRepo,
+    attendees: EventAttendeeRepo,
+    user: ActiveUser,
+) -> None:
+    _mine_or_404(events, event_id, user)
+    person = attendees.get(attendee_id)
+    # Checked against the event in the path as well as its own owner, so an
+    # id from someone else's roster cannot be deleted through an event you
+    # happen to own.
+    if person is None or person.event_id != event_id or person.owner_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Attendee not found.")
+    attendees.delete(attendee_id)
+
+
+@router.delete("/{event_id}/attendees", status_code=status.HTTP_204_NO_CONTENT)
+def clear_roster(
+    event_id: str,
+    events: EventRepo,
+    attendees: EventAttendeeRepo,
+    activity_repo: ActivityRepo,
+    user: ActiveUser,
+) -> None:
+    """Empty the roster, for re-importing a corrected file."""
+    event = _mine_or_404(events, event_id, user)
+    removed = attendees.delete_for(event_id)
+    activity.record(
+        activity_repo,
+        action="event.roster_cleared",
+        actor_id=user.id,
+        entity_type="event",
+        entity_id=event_id,
+        summary=f"Cleared {removed} attendees from {event.college}",
+        meta={"removed": removed},
     )
