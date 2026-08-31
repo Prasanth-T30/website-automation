@@ -64,6 +64,18 @@ export default function Applications() {
   const applications = useQuery({
     queryKey: [...APPLICATIONS_KEY, tab],
     queryFn: () => applicationsApi.list(tab === "all" ? undefined : { status: tab }),
+    // The shared pool is the one screen where staleness costs something: two
+    // HRs watching it will otherwise both try to claim the same registration,
+    // and the second only finds out when their click fails. Five seconds
+    // keeps the queue close enough to live that this stops happening.
+    refetchInterval: 5_000,
+    // Poll in the background too. An HR often leaves this tab open behind
+    // their work, and a queue that only updates when refocused is exactly
+    // the stale view this is meant to prevent.
+    refetchIntervalInBackground: true,
+    // Keep the current rows on screen while each poll runs, rather than
+    // flashing the loading state every five seconds.
+    placeholderData: (previous) => previous,
   });
   // Only to mark rows whose letter has already gone out. Shares Documents'
   // query key, so whichever screen loads first pays for it once. Skipped
